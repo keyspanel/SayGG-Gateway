@@ -3,6 +3,7 @@ import pool from './db';
 import { gwSession, GwSessionRequest } from './auth-mw';
 import { verifyPaytmPayment } from './paytm';
 import { sendOrderCallback } from './callback';
+import { apiError, apiSuccess, methodNotAllowed } from './api-response';
 
 const router = express.Router();
 
@@ -33,7 +34,7 @@ router.get('/transactions', gwSession, async (req: GwSessionRequest, res: Respon
                LIMIT ${limit} OFFSET ${offset}`;
   const r = await pool.query(sql, params);
   const c = await pool.query(`SELECT COUNT(*)::int AS n FROM gw_orders WHERE ${where.join(' AND ')}`, params);
-  res.json({ items: r.rows, total: c.rows[0].n, limit, offset });
+  apiSuccess(res, 'Transactions loaded', { items: r.rows, total: c.rows[0].n, limit, offset });
 });
 
 router.get('/dashboard', gwSession, async (req: GwSessionRequest, res: Response) => {
@@ -57,7 +58,7 @@ router.get('/dashboard', gwSession, async (req: GwSessionRequest, res: Response)
     `SELECT is_active, paytm_upi_id, paytm_merchant_id FROM gw_settings WHERE user_id=$1`,
     [userId],
   );
-  res.json({
+  apiSuccess(res, 'Dashboard loaded', {
     stats: stats.rows[0],
     recent: recent.rows,
     setup_complete: !!settings.rows[0]?.is_active,
@@ -67,17 +68,17 @@ router.get('/dashboard', gwSession, async (req: GwSessionRequest, res: Response)
 
 router.post('/orders/:id/refresh', gwSession, async (req: GwSessionRequest, res: Response) => {
   const orderId = parseInt(req.params.id, 10);
-  if (!orderId) return res.status(400).json({ error: 'Invalid id' });
+  if (!orderId) return apiError(res, 400, 'Invalid id', 'VALIDATION_ERROR', { field: 'id' });
   const userId = req.gwUser!.id;
 
   const r = await pool.query('SELECT * FROM gw_orders WHERE id=$1 AND user_id=$2', [orderId, userId]);
   const order = r.rows[0];
-  if (!order) return res.status(404).json({ error: 'Not found' });
-  if (order.status !== 'pending') return res.json({ status: order.status, refreshed: false });
+  if (!order) return apiError(res, 404, 'Order not found', 'ORDER_NOT_FOUND');
+  if (order.status !== 'pending') return apiSuccess(res, 'Order already finalized', { status: order.status, refreshed: false });
 
   const s = await pool.query('SELECT paytm_merchant_id, paytm_merchant_key, paytm_env FROM gw_settings WHERE user_id=$1', [userId]);
   const cfg = s.rows[0];
-  if (!cfg?.paytm_merchant_id || !cfg?.paytm_merchant_key) return res.status(400).json({ error: 'Gateway not configured' });
+  if (!cfg?.paytm_merchant_id || !cfg?.paytm_merchant_key) return apiError(res, 412, 'Gateway not configured', 'SETTINGS_MISSING');
 
   const verify = await verifyPaytmPayment(
     { merchant_id: cfg.paytm_merchant_id, merchant_key: cfg.paytm_merchant_key, env: cfg.paytm_env },
@@ -91,14 +92,18 @@ router.post('/orders/:id/refresh', gwSession, async (req: GwSessionRequest, res:
       [verify.txn_id || null, verify.bank_txn_id || null, JSON.stringify(verify.raw || {}).slice(0, 4000), orderId],
     );
     sendOrderCallback(orderId).catch(() => {});
-    return res.json({ status: 'paid', refreshed: true });
+    return apiSuccess(res, 'Order refreshed', { status: 'paid', refreshed: true });
   }
   if (verify.failure_type === 'payment_failed' || verify.failure_type === 'amount_mismatch') {
     await pool.query(`UPDATE gw_orders SET status='failed', updated_at=NOW(), raw_gateway_response=$1 WHERE id=$2`,
       [JSON.stringify(verify.raw || {}).slice(0, 4000), orderId]);
-    return res.json({ status: 'failed', refreshed: true });
+    return apiSuccess(res, 'Order refreshed', { status: 'failed', refreshed: true });
   }
-  return res.json({ status: order.status, refreshed: false, detail: verify.detail });
+  return apiSuccess(res, 'Order refresh checked', { status: order.status, refreshed: false, detail: verify.detail });
 });
+
+router.all('/transactions', methodNotAllowed(['GET']));
+router.all('/dashboard', methodNotAllowed(['GET']));
+router.all('/orders/:id/refresh', methodNotAllowed(['POST']));
 
 export default router;

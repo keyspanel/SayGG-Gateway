@@ -8,6 +8,7 @@ import authRouter from './routes-auth';
 import settingsRouter from './routes-settings';
 import ordersRouter from './routes-orders';
 import publicApiRouter from './routes-public-api';
+import { apiErrorHandler, apiNotFound, gatewayNotFound } from './api-response';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,12 +29,14 @@ app.use('/api/gateway/auth', authRouter);
 app.use('/api/gateway/settings', settingsRouter);
 app.use('/api/gateway', ordersRouter);
 app.use('/api/gateway', publicApiRouter);
+app.all('/api/gateway', gatewayNotFound);
+app.use('/api/gateway', gatewayNotFound);
+app.use('/api', apiNotFound);
+app.use(apiErrorHandler);
 
-// Static frontend (built by Vite into client/dist)
 const clientDist = path.resolve(__dirname, '..', 'client', 'dist');
 app.use(express.static(clientDist));
 
-// SPA fallback — serve index.html for any non-API route
 app.get(/^(?!\/api\/).*/, (_req, res) => {
   res.sendFile(path.join(clientDist, 'index.html'));
 });

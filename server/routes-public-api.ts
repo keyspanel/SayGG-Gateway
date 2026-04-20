@@ -3,6 +3,7 @@ import pool from './db';
 import { gwApiToken, GwApiRequest } from './auth-mw';
 import { buildUniqueTxnRef, buildUpiPayload, verifyPaytmPayment } from './paytm';
 import { sendOrderCallback } from './callback';
+import { apiError, apiSuccess, methodNotAllowed } from './api-response';
 
 const router = express.Router();
 
@@ -27,18 +28,18 @@ router.post('/create-order', gwApiToken, async (req: GwApiRequest, res: Response
     const note = req.body.note ? String(req.body.note).slice(0, 200) : null;
 
     if (!amount || isNaN(amount) || amount <= 0) {
-      return res.status(400).json({ success: false, error: 'amount must be a positive number' });
+      return apiError(res, 400, 'amount must be a positive number', 'VALIDATION_ERROR', { field: 'amount' });
     }
     if (currency !== 'INR') {
-      return res.status(400).json({ success: false, error: 'Only INR currency supported' });
+      return apiError(res, 400, 'Only INR currency supported', 'VALIDATION_ERROR', { field: 'currency' });
     }
     if (callback_url && !/^https?:\/\//i.test(callback_url)) {
-      return res.status(400).json({ success: false, error: 'callback_url must start with http:// or https://' });
+      return apiError(res, 400, 'callback_url must start with http:// or https://', 'VALIDATION_ERROR', { field: 'callback_url' });
     }
 
     const cfg = await getCreds(user.id);
     if (!cfg || !cfg.is_active || !cfg.paytm_upi_id || !cfg.paytm_merchant_id || !cfg.paytm_merchant_key) {
-      return res.status(412).json({ success: false, error: 'Gateway not configured. Save UPI settings first.' });
+      return apiError(res, 412, 'Gateway not configured. Save UPI settings first.', 'SETTINGS_MISSING');
     }
 
     if (client_order_id) {
@@ -48,7 +49,7 @@ router.post('/create-order', gwApiToken, async (req: GwApiRequest, res: Response
       );
       if (dup.rows[0]) {
         const o = dup.rows[0];
-        return res.status(409).json({ success: false, error: 'client_order_id already exists', order_id: o.id, txn_ref: o.txn_ref, status: o.status });
+        return apiError(res, 409, 'client_order_id already exists', 'ORDER_ALREADY_EXISTS', { order_id: o.id, txn_ref: o.txn_ref, status: o.status });
       }
     }
 
@@ -69,8 +70,7 @@ router.post('/create-order', gwApiToken, async (req: GwApiRequest, res: Response
     );
     const orderId = ins.rows[0].id;
 
-    res.json({
-      success: true,
+    apiSuccess(res, 'Order created', {
       order_id: orderId,
       txn_ref: txnRef,
       client_order_id,
@@ -85,7 +85,7 @@ router.post('/create-order', gwApiToken, async (req: GwApiRequest, res: Response
     });
   } catch (e) {
     console.error('[gw/create-order]', e);
-    res.status(500).json({ success: false, error: 'Failed to create order' });
+    apiError(res, 500, 'Failed to create order', 'CREATE_ORDER_FAILED');
   }
 });
 
@@ -107,10 +107,12 @@ async function checkOrder(req: GwApiRequest, res: Response) {
     } else if (client_order_id) {
       r = await pool.query('SELECT * FROM gw_orders WHERE client_order_id=$1 AND user_id=$2', [String(client_order_id), user.id]);
     } else {
-      return res.status(400).json({ success: false, error: 'Provide order_id, txn_ref or client_order_id' });
+      return apiError(res, 400, 'Provide order_id, txn_ref or client_order_id', 'VALIDATION_ERROR', {
+        accepted_fields: ['order_id', 'txn_ref', 'client_order_id'],
+      });
     }
     let order = r.rows[0];
-    if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (!order) return apiError(res, 404, 'Order not found', 'ORDER_NOT_FOUND');
 
     if (order.status === 'pending' && order.expires_at && new Date(order.expires_at).getTime() < Date.now()) {
       // mark expired but still try verification first
@@ -148,8 +150,7 @@ async function checkOrder(req: GwApiRequest, res: Response) {
       sendOrderCallback(order.id).catch(() => {});
     }
 
-    res.json({
-      success: true,
+    apiSuccess(res, 'Order status loaded', {
       order_id: order.id,
       client_order_id: order.client_order_id,
       txn_ref: order.txn_ref,
@@ -168,8 +169,11 @@ async function checkOrder(req: GwApiRequest, res: Response) {
     });
   } catch (e) {
     console.error('[gw/check-order]', e);
-    res.status(500).json({ success: false, error: 'Failed to check order' });
+    apiError(res, 500, 'Failed to check order', 'CHECK_ORDER_FAILED');
   }
 }
+
+router.all('/create-order', methodNotAllowed(['POST']));
+router.all('/check-order', methodNotAllowed(['GET', 'POST']));
 
 export default router;

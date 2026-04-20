@@ -9,7 +9,7 @@ export default function GwDashboard() {
   const [err, setErr] = useState('');
   useEffect(() => { gwGet('/dashboard').then(setData).catch((e) => setErr(e.message)); }, []);
   if (err) return <div className="gw-alert error">{err}</div>;
-  if (!data) return <div className="gw-loading">Loading…</div>;
+  if (!data) return <div className="gw-loading">Loading dashboard data…</div>;
   const s = data.stats;
 
   return (
@@ -34,23 +34,38 @@ export default function GwDashboard() {
       </div>
 
       <div className="gw-shortcuts">
-        <Link to="/gateway/settings" className="gw-shortcut"><strong>UPI Settings</strong><span>Configure your Paytm credentials</span></Link>
-        <Link to="/gateway/docs" className="gw-shortcut"><strong>API Docs</strong><span>Get your token & integration guide</span></Link>
-        <Link to="/gateway/transactions" className="gw-shortcut"><strong>Transactions</strong><span>View your full order history</span></Link>
+        <Link to="/gateway/settings" className="gw-shortcut">
+          <strong>UPI Settings</strong>
+          <span>Configure your Paytm credentials to start accepting payments</span>
+        </Link>
+        <Link to="/gateway/docs" className="gw-shortcut">
+          <strong>API Docs</strong>
+          <span>Get your API token and view the integration guide</span>
+        </Link>
+        <Link to="/gateway/transactions" className="gw-shortcut">
+          <strong>Transactions</strong>
+          <span>View and search your full order history</span>
+        </Link>
       </div>
 
       <div className="gw-card">
-        <div className="gw-card-h"><h3>Latest transactions</h3><Link to="/gateway/transactions">View all</Link></div>
+        <div className="gw-card-h">
+          <h3>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            Latest transactions
+          </h3>
+          <Link to="/gateway/transactions">View all</Link>
+        </div>
         {data.recent.length === 0 ? <p className="gw-muted">No transactions yet.</p> :
           <div className="gw-table">
             <div className="gw-tr head"><span>Txn Ref</span><span>Order ID</span><span>Amount</span><span>Status</span><span>Created</span></div>
             {data.recent.map((o: any) => (
               <div className="gw-tr" key={o.id}>
-                <span className="mono">{o.txn_ref}</span>
+                <span className="mono small">{o.txn_ref}</span>
                 <span>{o.client_order_id || `#${o.id}`}</span>
-                <span>₹{parseFloat(o.amount).toFixed(2)}</span>
+                <span style={{fontWeight: 600}}>₹{parseFloat(o.amount).toFixed(2)}</span>
                 <span><StatusBadge status={o.status} /></span>
-                <span>{new Date(o.created_at).toLocaleString()}</span>
+                <span className="gw-muted">{new Date(o.created_at).toLocaleString()}</span>
               </div>
             ))}
           </div>
@@ -63,8 +78,8 @@ export default function GwDashboard() {
 function Stat({ label, value, accent }: { label: string; value: any; accent?: string }) {
   return (
     <div className={`gw-stat ${accent || ''}`}>
-      <div className="gw-stat-v">{value}</div>
       <div className="gw-stat-l">{label}</div>
+      <div className="gw-stat-v">{value}</div>
     </div>
   );
 }

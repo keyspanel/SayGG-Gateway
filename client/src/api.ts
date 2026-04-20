@@ -17,7 +17,8 @@ export async function gwApi(path: string, options: RequestInit = {}): Promise<an
   }
   let data: any = null;
   try { data = await res.json(); } catch { data = {}; }
-  if (!res.ok) throw new Error(data?.error || 'Request failed');
+  if (!res.ok) throw new Error(data?.message || data?.error || data?.code || 'Request failed');
+  if (data && typeof data === 'object' && 'success' in data && 'data' in data) return data.data;
   return data;
 }
 

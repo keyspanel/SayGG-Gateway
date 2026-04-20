@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import pool from './db';
 import config from './config';
+import { apiError } from './api-response';
 
 export const GW_JWT_SECRET = config.auth.jwtSecret + ':gw';
 
@@ -32,7 +33,7 @@ async function loadUserById(id: number): Promise<GwUser | null> {
 export async function gwSession(req: GwSessionRequest, res: Response, next: NextFunction): Promise<void> {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Authentication required' });
+    apiError(res, 401, 'Authentication required', 'AUTH_REQUIRED');
     return;
   }
   try {
@@ -40,13 +41,13 @@ export async function gwSession(req: GwSessionRequest, res: Response, next: Next
     if (decoded.kind !== 'gw') throw new Error('bad token');
     const user = await loadUserById(decoded.uid);
     if (!user || user.status !== 'active') {
-      res.status(401).json({ error: 'Account inactive' });
+      apiError(res, 401, 'Account inactive', 'ACCOUNT_INACTIVE');
       return;
     }
     req.gwUser = user;
     next();
   } catch {
-    res.status(401).json({ error: 'Invalid or expired session' });
+    apiError(res, 401, 'Invalid or expired session', 'INVALID_SESSION');
   }
 }
 
@@ -58,7 +59,7 @@ export async function gwApiToken(req: GwApiRequest, res: Response, next: NextFun
   if (!token && typeof req.query.api_token === 'string') token = (req.query.api_token as string).trim();
   if (!token && req.body && typeof req.body.api_token === 'string') token = String(req.body.api_token).trim();
   if (!token) {
-    res.status(401).json({ success: false, error: 'API token required' });
+    apiError(res, 401, 'API token required', 'API_TOKEN_REQUIRED');
     return;
   }
   try {
@@ -68,16 +69,16 @@ export async function gwApiToken(req: GwApiRequest, res: Response, next: NextFun
     );
     const user = r.rows[0];
     if (!user) {
-      res.status(401).json({ success: false, error: 'Invalid API token' });
+      apiError(res, 401, 'Invalid API token', 'INVALID_API_TOKEN');
       return;
     }
     if (user.status !== 'active') {
-      res.status(403).json({ success: false, error: 'Account inactive' });
+      apiError(res, 403, 'Account inactive', 'ACCOUNT_INACTIVE');
       return;
     }
     req.gwUser = user;
     next();
   } catch {
-    res.status(500).json({ success: false, error: 'Internal error' });
+    apiError(res, 500, 'Internal error', 'INTERNAL_ERROR');
   }
 }
