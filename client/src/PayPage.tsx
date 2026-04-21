@@ -384,11 +384,7 @@ export default function PayPage() {
           <div className="pp-qr-wrap">
             <img
               className="pp-qr-img"
-              src={
-                order.upi_payload
-                  ? `https://api.qrserver.com/v1/create-qr-code/?size=520x520&qzone=1&format=png&data=${encodeURIComponent(order.upi_payload)}`
-                  : `/api/pay/${order.public_token}/qr.png?size=520`
-              }
+              src={`/api/pay/${order.public_token}/qr.png?size=520`}
               alt="UPI payment QR"
               width={240}
               height={240}
