@@ -25,3 +25,23 @@ export async function gwApi(path: string, options: RequestInit = {}): Promise<an
 export const gwGet = (p: string) => gwApi(p);
 export const gwPost = (p: string, b?: any) => gwApi(p, { method: 'POST', body: JSON.stringify(b || {}) });
 export const gwPut = (p: string, b?: any) => gwApi(p, { method: 'PUT', body: JSON.stringify(b || {}) });
+
+// Raw call to the public gateway API using a user-supplied API token.
+// Returns { status, ok, body } so the test console can show the real response envelope.
+export async function gwApiRaw(
+  path: string,
+  apiToken: string,
+  init: { method?: string; body?: any } = {},
+): Promise<{ status: number; ok: boolean; body: any }> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: init.method || 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiToken}`,
+    },
+    body: init.body ? JSON.stringify(init.body) : undefined,
+  });
+  let body: any = null;
+  try { body = await res.json(); } catch { body = { _raw: await res.text().catch(() => '') }; }
+  return { status: res.status, ok: res.ok, body };
+}

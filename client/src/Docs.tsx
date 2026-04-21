@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { gwGet, gwPost } from './api';
+import { gwApiRaw, gwGet, gwPost } from './api';
 import { useGwAuth } from './AuthCtx';
 
 function Copy({ text, label = 'Copy' }: { text: string; label?: string }) {
@@ -327,6 +327,9 @@ echo curl_exec($ch);`;
         </div>
       </div>
 
+      {/* Test Console — only when token is ready */}
+      {token && settingsActive && <TestConsole apiToken={token} baseUrl={baseUrl} />}
+
       {/* Create Order */}
       <div className="gw-card">
         <div className="gw-card-h">
@@ -425,6 +428,182 @@ if (expected !== req.headers['x-gateway-signature']) throw new Error('bad signat
           <li><span className="gw-badge mute" style={{ minWidth: 78, justifyContent: 'center' }}>expired</span> <span className="gw-muted">not paid before <code>expires_at</code></span></li>
         </ul>
       </div>
+    </div>
+  );
+}
+
+function randomOrderId() {
+  const d = new Date();
+  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}`;
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `TEST-${stamp}-${rand}`;
+}
+
+function pretty(v: any) {
+  try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+}
+
+function TestConsole({ apiToken, baseUrl }: { apiToken: string; baseUrl: string }) {
+  const [amount, setAmount] = useState('1.00');
+  const [currency, setCurrency] = useState('INR');
+  const [clientOrderId, setClientOrderId] = useState(randomOrderId());
+  const [customerRef, setCustomerRef] = useState('');
+  const [callbackUrl, setCallbackUrl] = useState('');
+  const [note, setNote] = useState('Test order from API Docs');
+
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createOut, setCreateOut] = useState<{ status: number; ok: boolean; body: any } | null>(null);
+
+  const [lookupKind, setLookupKind] = useState<'order_id' | 'txn_ref' | 'client_order_id'>('order_id');
+  const [lookupValue, setLookupValue] = useState('');
+  const [checkBusy, setCheckBusy] = useState(false);
+  const [checkOut, setCheckOut] = useState<{ status: number; ok: boolean; body: any } | null>(null);
+
+  const runCreate = async () => {
+    setCreateBusy(true); setCreateOut(null);
+    const body: any = {
+      amount: parseFloat(amount),
+      currency: currency.trim().toUpperCase() || 'INR',
+    };
+    if (clientOrderId.trim()) body.client_order_id = clientOrderId.trim();
+    if (customerRef.trim()) body.customer_reference = customerRef.trim();
+    if (callbackUrl.trim()) body.callback_url = callbackUrl.trim();
+    if (note.trim()) body.note = note.trim();
+    try {
+      const r = await gwApiRaw('/create-order', apiToken, { method: 'POST', body });
+      setCreateOut(r);
+      if (r.ok && r.body?.data?.order_id) {
+        setLookupKind('order_id');
+        setLookupValue(String(r.body.data.order_id));
+      }
+    } catch (e: any) {
+      setCreateOut({ status: 0, ok: false, body: { success: false, message: e?.message || 'Network error' } });
+    } finally {
+      setCreateBusy(false);
+    }
+  };
+
+  const runCheck = async () => {
+    if (!lookupValue.trim()) return;
+    setCheckBusy(true); setCheckOut(null);
+    try {
+      const body: any = {};
+      if (lookupKind === 'order_id') body.order_id = parseInt(lookupValue.trim(), 10);
+      else body[lookupKind] = lookupValue.trim();
+      const r = await gwApiRaw('/check-order', apiToken, { method: 'POST', body });
+      setCheckOut(r);
+    } catch (e: any) {
+      setCheckOut({ status: 0, ok: false, body: { success: false, message: e?.message || 'Network error' } });
+    } finally {
+      setCheckBusy(false);
+    }
+  };
+
+  return (
+    <div className="gw-card feature">
+      <div className="gw-card-h">
+        <h3>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+          Test Console
+        </h3>
+        <span className="gw-badge ok">Live</span>
+      </div>
+      <p className="gw-muted" style={{ marginTop: -6 }}>
+        Hits the real <code>/create-order</code> and <code>/check-order</code> endpoints with your API token. Responses are written straight to your database — created orders will appear on the Transactions page.
+      </p>
+
+      <div className="gw-h4">Create a test order</div>
+      <div className="gw-form">
+        <label className="gw-field">
+          <span>Amount (INR) <span className="gw-required">*</span></span>
+          <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="1.00" />
+        </label>
+        <label className="gw-field">
+          <span>Currency</span>
+          <input value={currency} onChange={(e) => setCurrency(e.target.value)} placeholder="INR" />
+        </label>
+        <label className="gw-field">
+          <span>client_order_id <small>your unique id</small></span>
+          <div className="gw-field-pwd">
+            <input value={clientOrderId} onChange={(e) => setClientOrderId(e.target.value)} placeholder="ORD-1001" autoCapitalize="off" />
+            <button type="button" onClick={() => setClientOrderId(randomOrderId())} aria-label="Generate random id">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            </button>
+          </div>
+        </label>
+        <label className="gw-field">
+          <span>customer_reference <small>optional</small></span>
+          <input value={customerRef} onChange={(e) => setCustomerRef(e.target.value)} placeholder="user_42" />
+        </label>
+        <label className="gw-field">
+          <span>callback_url <small>optional, http(s)://</small></span>
+          <input value={callbackUrl} onChange={(e) => setCallbackUrl(e.target.value)} placeholder="https://your-site.com/payment/callback" inputMode="url" autoCapitalize="off" />
+        </label>
+        <label className="gw-field">
+          <span>note <small>optional</small></span>
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Test order" />
+        </label>
+        <div className="gw-actions">
+          <button className="gw-btn-primary" onClick={runCreate} disabled={createBusy || !amount}>
+            {createBusy ? 'Sending…' : 'Create test order'}
+          </button>
+          <button className="gw-btn-ghost" type="button" onClick={() => { setCreateOut(null); setClientOrderId(randomOrderId()); }}>Reset</button>
+        </div>
+      </div>
+
+      {createOut && (
+        <div style={{ marginTop: 14 }}>
+          <div className="gw-base-row" style={{ marginBottom: 8 }}>
+            <b>Response</b>
+            <span className={`gw-badge ${createOut.ok ? 'ok' : 'bad'}`}>HTTP {createOut.status || 'ERR'}</span>
+            {createOut.ok && createOut.body?.data?.order_id && (
+              <Link to="/gateway/transactions" style={{ marginLeft: 'auto', fontSize: 13 }}>
+                View in Transactions →
+              </Link>
+            )}
+          </div>
+          <Code>{pretty(createOut.body)}</Code>
+        </div>
+      )}
+
+      <div className="gw-h4" style={{ marginTop: 18 }}>Check order status</div>
+      <div className="gw-form">
+        <label className="gw-field">
+          <span>Lookup by</span>
+          <div className="gw-select-wrap">
+            <select value={lookupKind} onChange={(e) => setLookupKind(e.target.value as any)}>
+              <option value="order_id">order_id</option>
+              <option value="txn_ref">txn_ref</option>
+              <option value="client_order_id">client_order_id</option>
+            </select>
+          </div>
+        </label>
+        <label className="gw-field">
+          <span>Value</span>
+          <input value={lookupValue} onChange={(e) => setLookupValue(e.target.value)} placeholder={lookupKind === 'order_id' ? '123' : lookupKind === 'txn_ref' ? 'GW…' : 'ORD-1001'} autoCapitalize="off" />
+        </label>
+        <div className="gw-actions">
+          <button className="gw-btn-primary" onClick={runCheck} disabled={checkBusy || !lookupValue.trim()}>
+            {checkBusy ? 'Checking…' : 'Check status'}
+          </button>
+          <button className="gw-btn-ghost" type="button" onClick={() => setCheckOut(null)}>Clear</button>
+        </div>
+      </div>
+
+      {checkOut && (
+        <div style={{ marginTop: 14 }}>
+          <div className="gw-base-row" style={{ marginBottom: 8 }}>
+            <b>Response</b>
+            <span className={`gw-badge ${checkOut.ok ? 'ok' : 'bad'}`}>HTTP {checkOut.status || 'ERR'}</span>
+            {checkOut.body?.data?.status && (
+              <span className={`gw-badge ${checkOut.body.data.status === 'paid' ? 'ok' : checkOut.body.data.status === 'pending' ? 'warn' : 'bad'}`}>
+                {checkOut.body.data.status}
+              </span>
+            )}
+          </div>
+          <Code>{pretty(checkOut.body)}</Code>
+        </div>
+      )}
     </div>
   );
 }
