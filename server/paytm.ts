@@ -32,37 +32,34 @@ export function buildUniqueTxnRef(suffix: number | string = ''): string {
 }
 
 /**
- * Encode a UPI query-parameter value safely.
- *
- * Differences from encodeURIComponent:
- *   - `@` is left LITERAL. Per RFC 3986, `@` is a valid query character
- *     (it is in the `pchar` set). Some Android UPI apps (notably older
- *     Paytm, BHIM, and some PhonePe builds) do NOT percent-decode the
- *     `pa` value before sending it to NPCI when the URI arrives via
- *     `Intent.ACTION_VIEW`. If `pa` arrives as `paytm.x%40pty`, NPCI
- *     receives the literal VPA `paytm.x%40pty` and responds "Receiver
- *     UPI ID or VPA is NOT Available" — exactly the symptom we are
- *     fixing. Scanning the QR uses the in-app QR pipeline which decodes
- *     properly, which is why the QR path appeared to work.
- *
- * All other characters that need percent-encoding (including space,
- * which becomes %20) are still encoded. This produces a strictly
- * RFC 3986-valid URI that matches the format real-world merchant UPI
- * QRs and deep links use in production.
+ * Encoder for the `pa` value: keeps `@` literal (RFC 3986-valid in the
+ * query component) so apps that forward `pa` raw to NPCI don't end up
+ * sending `%40` as part of the VPA.
  */
-function upiEncode(value: string): string {
+function encPa(value: string): string {
   return encodeURIComponent(value).replace(/%40/g, '@');
 }
 
 /**
- * Builds the canonical UPI deep-link payload used for BOTH:
- *   - the QR image rendered on the hosted pay page
+ * Encoder for `pn` / `tn` text values: spaces become `+` to match the
+ * canonical merchant-QR pattern we are validating in this build.
+ */
+function encText(value: string): string {
+  return encodeURIComponent(value).replace(/%20/g, '+');
+}
+
+/**
+ * Builds the canonical RAW UPI deep-link payload used for BOTH:
  *   - the "Pay with UPI app" anchor href on the hosted pay page
+ *   - the "Copy link" action on the hosted pay page
+ *   - the QR image (the frontend URL-encodes this exact string once
+ *     when passing it as the `data` query parameter to the QR image
+ *     service — the QR's encoded content is still this same raw URI).
  *
- * Both paths consume this exact same string. There is intentionally
- * NO separate "QR payload" vs "launch payload" — splitting them would
- * be a foot-gun and is not needed: the format below is valid for QR
- * scanners AND for Android intent handoff.
+ * Format (matches the canonical merchant-QR pattern):
+ *   upi://pay?pa=<VPA>&am=<AMOUNT>&pn=<NAME>&mc=5411&tn=<NOTE>&tr=<REF>&cu=INR&mode=02
+ *
+ * Single source of truth. Never double-encoded anywhere downstream.
  */
 export function buildUpiPayload(opts: {
   upi_id: string;
@@ -76,14 +73,15 @@ export function buildUpiPayload(opts: {
   const pn = (opts.payee_name || '').trim();
   const tr = (opts.txn_ref || '').trim();
   const tn = (opts.note || `Order ${tr}`).trim();
-  // Standard UPI parameter order used by Paytm/Razorpay/PhonePe merchant QRs.
   const parts = [
-    `pa=${upiEncode(pa)}`,
-    `pn=${upiEncode(pn)}`,
-    `am=${upiEncode(amount)}`,
+    `pa=${encPa(pa)}`,
+    `am=${encodeURIComponent(amount)}`,
+    `pn=${encText(pn)}`,
+    `mc=5411`,
+    `tn=${encText(tn)}`,
+    `tr=${encodeURIComponent(tr)}`,
     `cu=INR`,
-    `tr=${upiEncode(tr)}`,
-    `tn=${upiEncode(tn)}`,
+    `mode=02`,
   ];
   return `upi://pay?${parts.join('&')}`;
 }
