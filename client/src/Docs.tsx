@@ -202,10 +202,9 @@ echo curl_exec($ch);`;
   "message": "Invalid endpoint or method",
   "code": "GATEWAY_ROUTE_NOT_FOUND",
   "details": {
-    "available_endpoints": {
-      "create_order": "/api/gateway/create-order",
-      "check_order": "/api/gateway/check-order"
-    }
+    "path": "/api/gateway",
+    "method": "GET",
+    "hint": "Use the documented gateway API endpoints with the correct HTTP method. See API Docs after login."
   }
 }`;
 

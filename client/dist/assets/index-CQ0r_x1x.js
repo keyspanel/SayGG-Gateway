@@ -105,10 +105,9 @@ echo curl_exec($ch);`;return(0,M.jsxs)(`div`,{className:`gw-page`,children:[(0,M
   "message": "Invalid endpoint or method",
   "code": "GATEWAY_ROUTE_NOT_FOUND",
   "details": {
-    "available_endpoints": {
-      "create_order": "/api/gateway/create-order",
-      "check_order": "/api/gateway/check-order"
-    }
+    "path": "/api/gateway",
+    "method": "GET",
+    "hint": "Use the documented gateway API endpoints with the correct HTTP method. See API Docs after login."
   }
 }`})]}),(0,M.jsxs)(`div`,{className:`gw-card`,children:[(0,M.jsx)(`div`,{className:`gw-card-h`,children:(0,M.jsxs)(`h3`,{children:[(0,M.jsxs)(`svg`,{width:`18`,height:`18`,viewBox:`0 0 24 24`,fill:`none`,stroke:`currentColor`,strokeWidth:`2`,strokeLinecap:`round`,strokeLinejoin:`round`,children:[(0,M.jsx)(`path`,{d:`M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71`}),(0,M.jsx)(`path`,{d:`M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71`})]}),`Callback payload`]})}),(0,M.jsxs)(`p`,{className:`gw-muted`,children:[`When an order is verified as paid, we POST this JSON body to your `,(0,M.jsx)(`code`,{children:`callback_url`}),`. Reply with HTTP 2xx to acknowledge. If delivery fails, we automatically retry on every subsequent Check Order call until it succeeds.`]}),(0,M.jsx)(xr,{children:`{
   "order_id": 123,
