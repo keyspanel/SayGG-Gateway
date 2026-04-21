@@ -31,6 +31,20 @@ export function buildUniqueTxnRef(suffix: number | string = ''): string {
   return `GW${ts}${suffix || ''}${rand}`;
 }
 
+/**
+ * Builds the canonical UPI deep-link payload used for BOTH:
+ *   - the QR image rendered on the hosted pay page
+ *   - the "Pay with UPI app" anchor href on the hosted pay page
+ *
+ * IMPORTANT: We must NOT use URLSearchParams here. URLSearchParams encodes
+ * spaces as `+` (application/x-www-form-urlencoded). UPI apps parse
+ * `upi://pay?...` with strict RFC 3986 rules where `+` is a literal `+`,
+ * not a space. That breaks query parsing in GPay/PhonePe and surfaces as
+ * "Receiver UPI ID or VPA is NOT available" on the direct app-launch path.
+ *
+ * Per-parameter encodeURIComponent gives us `%20` for spaces and `%40` for
+ * `@`, both of which are valid and accepted by every UPI app.
+ */
 export function buildUpiPayload(opts: {
   upi_id: string;
   payee_name: string;
@@ -39,14 +53,19 @@ export function buildUpiPayload(opts: {
   note?: string;
 }): string {
   const amount = opts.amount.toFixed(2);
-  const params = new URLSearchParams();
-  params.set('pa', opts.upi_id);
-  params.set('pn', opts.payee_name);
-  params.set('am', amount);
-  params.set('cu', 'INR');
-  params.set('tr', opts.txn_ref);
-  params.set('tn', opts.note || `Order ${opts.txn_ref}`);
-  return `upi://pay?${params.toString()}`;
+  const pa = (opts.upi_id || '').trim();
+  const pn = (opts.payee_name || '').trim();
+  const tr = (opts.txn_ref || '').trim();
+  const tn = (opts.note || `Order ${tr}`).trim();
+  const parts = [
+    `pa=${encodeURIComponent(pa)}`,
+    `pn=${encodeURIComponent(pn)}`,
+    `am=${encodeURIComponent(amount)}`,
+    `cu=INR`,
+    `tr=${encodeURIComponent(tr)}`,
+    `tn=${encodeURIComponent(tn)}`,
+  ];
+  return `upi://pay?${parts.join('&')}`;
 }
 
 function fetchUrl(url: string, timeoutMs = 15000): Promise<string> {
