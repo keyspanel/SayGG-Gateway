@@ -42,7 +42,7 @@ export default function GwTransactions() {
       <div className="gw-page-h">
         <div>
           <h2>Transactions</h2>
-          <p>Search, filter and inspect every order processed by your gateway.</p>
+          <p>Search and inspect every order.</p>
         </div>
       </div>
 
@@ -59,12 +59,12 @@ export default function GwTransactions() {
       {err && <div className="gw-alert error"><span>{err}</span></div>}
 
       {loading ? (
-        <div className="gw-loading">Loading transactions…</div>
+        <div className="gw-loading">Loading…</div>
       ) : items.length === 0 ? (
         <div className="gw-empty">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-          <h3>No transactions found</h3>
-          <p>Try adjusting your search or filters, or create a test order via the API.</p>
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+          <h3>No matches</h3>
+          <p>Adjust filters or create a test order from the API Reference.</p>
         </div>
       ) : (
         <div className="gw-txn-grid">
@@ -92,13 +92,13 @@ export default function GwTransactions() {
                       : <><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>
                     }
                   </svg>
-                  Callback {o.callback_sent ? `sent · ${o.callback_status || 'ok'}` : 'pending'}
+                  Webhook {o.callback_sent ? `· ${o.callback_status || 'ok'}` : 'pending'}
                 </div>
               )}
               {o.status === 'pending' && (
                 <button className="gw-btn-ghost sm" style={{ alignSelf: 'flex-start' }} disabled={refreshing === o.id} onClick={() => refresh(o.id)}>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                  {refreshing === o.id ? 'Checking…' : 'Refresh status'}
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                  {refreshing === o.id ? 'Checking…' : 'Refresh'}
                 </button>
               )}
             </div>
@@ -108,7 +108,7 @@ export default function GwTransactions() {
 
       {total > 0 && !loading && (
         <div className="gw-pager">
-          <span>Showing {offset + 1}–{Math.min(offset + items.length, total)} of {total}</span>
+          <span>{offset + 1}–{Math.min(offset + items.length, total)} of {total}</span>
           <div>
             <button className="gw-btn-ghost sm" disabled={offset === 0} onClick={() => load(Math.max(0, offset - PAGE_SIZE))}>← Prev</button>
             <button className="gw-btn-ghost sm" disabled={offset + items.length >= total} onClick={() => load(offset + PAGE_SIZE)}>Next →</button>

@@ -19,11 +19,6 @@ interface PayOrder {
   bank_rrn: string | null;
 }
 
-// Polling cadence — Razorpay-style: gentle, no spam, no false transitions.
-//   0–60 s    : every 5 s   (catch fast UPI confirmations)
-//   1–5 min   : every 8 s
-//   5–15 min  : every 15 s
-//   15+ min   : every 30 s  (still polls until the order truly finalizes)
 function pollIntervalFor(elapsedMs: number): number {
   if (elapsedMs < 60_000) return 5000;
   if (elapsedMs < 5 * 60_000) return 8000;
@@ -58,13 +53,13 @@ function StatusVisual({ order }: { order: PayOrder }) {
     return (
       <div className="pp-status paid">
         <div className="pp-status-icon">
-          <svg viewBox="0 0 52 52" width="56" height="56" aria-hidden="true">
+          <svg viewBox="0 0 52 52" width="52" height="52" aria-hidden="true">
             <circle cx="26" cy="26" r="24" fill="none" stroke="currentColor" strokeWidth="3" />
             <path d="M14 27 L23 36 L39 18" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
-        <h3>Payment received successfully</h3>
-        <p>Thanks! Your payment of ₹{order.amount.toFixed(2)} has been confirmed.</p>
+        <h3>Payment received</h3>
+        <p>₹{order.amount.toFixed(2)} confirmed.</p>
         {order.bank_rrn && <p className="pp-meta">Bank RRN <code>{order.bank_rrn}</code></p>}
       </div>
     );
@@ -73,11 +68,11 @@ function StatusVisual({ order }: { order: PayOrder }) {
     return (
       <div className="pp-status failed">
         <div className="pp-status-icon">
-          <svg viewBox="0 0 52 52" width="56" height="56"><circle cx="26" cy="26" r="24" fill="none" stroke="currentColor" strokeWidth="3"/><line x1="18" y1="18" x2="34" y2="34" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round"/><line x1="34" y1="18" x2="18" y2="34" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round"/></svg>
+          <svg viewBox="0 0 52 52" width="52" height="52"><circle cx="26" cy="26" r="24" fill="none" stroke="currentColor" strokeWidth="3"/><line x1="18" y1="18" x2="34" y2="34" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round"/><line x1="34" y1="18" x2="18" y2="34" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round"/></svg>
         </div>
-        <h3>This payment couldn't be completed</h3>
-        <p>The bank or UPI app reported that the transaction did not go through. If any amount was debited, it will be auto-reversed by your bank within a few business days.</p>
-        <p className="pp-meta">Please request a new payment link from the merchant to try again.</p>
+        <h3>Payment failed</h3>
+        <p>If any amount was debited, your bank will auto-reverse it within a few business days.</p>
+        <p className="pp-meta">Request a fresh payment link to retry.</p>
       </div>
     );
   }
@@ -85,18 +80,18 @@ function StatusVisual({ order }: { order: PayOrder }) {
     return (
       <div className="pp-status expired">
         <div className="pp-status-icon">
-          <svg viewBox="0 0 52 52" width="56" height="56"><circle cx="26" cy="26" r="24" fill="none" stroke="currentColor" strokeWidth="3"/><path d="M26 14 V27 L34 33" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <svg viewBox="0 0 52 52" width="52" height="52"><circle cx="26" cy="26" r="24" fill="none" stroke="currentColor" strokeWidth="3"/><path d="M26 14 V27 L34 33" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </div>
-        <h3>This payment link has expired</h3>
-        <p>Please request a new payment link from the merchant to continue.</p>
+        <h3>Link expired</h3>
+        <p>Request a fresh payment link from the merchant.</p>
       </div>
     );
   }
   if (order.status === 'cancelled') {
     return (
       <div className="pp-status expired">
-        <h3>This order is no longer active</h3>
-        <p>The merchant has cancelled this payment request.</p>
+        <h3>Cancelled</h3>
+        <p>The merchant cancelled this payment request.</p>
       </div>
     );
   }
@@ -113,7 +108,6 @@ export default function PayPage() {
   const [copied, setCopied] = useState(false);
   const startedAtRef = useRef<number>(Date.now());
 
-  // Initial load
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -127,13 +121,11 @@ export default function PayPage() {
     return () => { cancelled = true; };
   }, [token]);
 
-  // Tick for countdown
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
 
-  // Polling — only while pending and not over the time cap
   const pollOnce = useCallback(async () => {
     if (!token) return;
     setChecking(true);
@@ -142,9 +134,6 @@ export default function PayPage() {
     setChecking(false);
   }, [token]);
 
-  // Adaptive polling: only while pending, paused on hidden tabs, gentle
-  // backoff. Polling continues until the order genuinely finalizes (paid,
-  // failed, expired, cancelled) — no time cap, no false transitions.
   useEffect(() => {
     if (!order || order.is_terminal) return;
     if (order.status !== 'pending') return;
@@ -166,7 +155,7 @@ export default function PayPage() {
   if (loading) {
     return (
       <div className="pp-shell">
-        <div className="pp-loading">Loading payment…</div>
+        <div className="pp-loading">Loading…</div>
       </div>
     );
   }
@@ -179,9 +168,9 @@ export default function PayPage() {
             <div className="pp-brand-mark">PG</div>
             <div className="pp-brand-name">PayGateway</div>
           </div>
-          <h2>Payment link not found</h2>
-          <p>{error || 'This payment link is invalid or has been removed.'}</p>
-          <p className="pp-meta">Please request a fresh payment link from the merchant.</p>
+          <h2>Link not found</h2>
+          <p>{error || 'This payment link is invalid or removed.'}</p>
+          <p className="pp-meta">Request a fresh link from the merchant.</p>
         </div>
       </div>
     );
@@ -238,29 +227,27 @@ export default function PayPage() {
             <img
               className="pp-qr-img"
               src={`/api/pay/${order.public_token}/qr.png?size=520`}
-              alt="UPI payment QR code"
-              width={260}
-              height={260}
+              alt="UPI payment QR"
+              width={240}
+              height={240}
             />
           </div>
           <ol className="pp-steps">
-            <li>Open any UPI app (GPay, PhonePe, Paytm, BHIM…).</li>
+            <li>Open any UPI app — GPay, PhonePe, Paytm, BHIM.</li>
             <li>Scan the QR or tap the button below on a phone.</li>
-            <li>Approve the payment of <b>₹{order.amount.toFixed(2)}</b>.</li>
-            <li>Status updates here automatically once received.</li>
+            <li>Approve <b>₹{order.amount.toFixed(2)}</b>.</li>
+            <li>Status updates here automatically.</li>
           </ol>
           <div className="pp-actions">
             {order.upi_payload && (
               <a href={order.upi_payload} className="pp-btn primary">Pay with UPI app</a>
             )}
-            <button className="pp-btn ghost" onClick={copyUpi}>{copied ? 'Copied ✓' : 'Copy UPI link'}</button>
+            <button className="pp-btn ghost" onClick={copyUpi}>{copied ? 'Copied ✓' : 'Copy link'}</button>
           </div>
           <div className="pp-poll-row">
             <span className={`pp-dot${checking ? ' on' : ''}`} />
-            {checking
-              ? 'Checking with the bank…'
-              : 'Waiting for payment confirmation — this page updates automatically'}
-            <button className="pp-link" onClick={pollOnce} disabled={checking}>Refresh status</button>
+            {checking ? 'Checking…' : 'Waiting for payment'}
+            <button className="pp-link" onClick={pollOnce} disabled={checking}>Refresh</button>
           </div>
         </div>
       )}
@@ -271,14 +258,14 @@ export default function PayPage() {
           <div className="pp-meta-row">
             <div><b>Order</b><span>{orderRef}</span></div>
             <div><b>Amount</b><span>₹{order.amount.toFixed(2)}</span></div>
-            {order.verified_at && <div><b>Confirmed at</b><span>{new Date(order.verified_at).toLocaleString()}</span></div>}
+            {order.verified_at && <div><b>Confirmed</b><span>{new Date(order.verified_at).toLocaleString()}</span></div>}
           </div>
         </div>
       )}
 
       <footer className="pp-foot">
         <span>Secured by <strong>PayGateway</strong></span>
-        <span>Order ref: <code>{order.txn_ref}</code></span>
+        <span>Ref <code>{order.txn_ref}</code></span>
       </footer>
     </div>
   );
