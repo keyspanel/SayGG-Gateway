@@ -299,6 +299,40 @@ export default function PayPage() {
     try { await navigator.clipboard.writeText(order.upi_payload); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
   };
 
+  /**
+   * Android handoff for `upi://pay?...`.
+   *
+   * On Android, an `<a href="upi://...">` click goes through Chrome's external
+   * scheme handler, which in some browser builds (in-app webviews, Samsung
+   * Internet, MIUI Browser, Brave) silently drops the click or hands the URI
+   * to the wrong intent. The documented robust path is the `intent://` URL
+   * format, which gives Android's intent system an explicit
+   * scheme + ACTION_VIEW + BROWSABLE category and triggers the system app
+   * chooser reliably across browsers and webviews.
+   *
+   * We keep the plain `upi://` URI as the anchor's `href` so that:
+   *   - iOS / desktop click still works natively.
+   *   - "Copy link" copies the canonical UPI string.
+   *   - If JS is disabled, Android still falls through to the native handler.
+   */
+  const buildAndroidIntent = (upiUrl: string): string => {
+    const i = upiUrl.indexOf('://');
+    if (i === -1) return upiUrl;
+    const rest = upiUrl.slice(i + 3); // e.g. "pay?pa=...&pn=..."
+    return `intent://${rest}#Intent;scheme=upi;action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;end`;
+  };
+
+  const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent || '');
+
+  const onLaunchUpi = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!order.upi_payload) return;
+    if (isAndroid) {
+      e.preventDefault();
+      window.location.href = buildAndroidIntent(order.upi_payload);
+    }
+    // else: let the anchor's native upi:// href fire (iOS, desktop).
+  };
+
   const orderRefId = order.client_order_id || order.txn_ref;
   const isPending = order.status === 'pending';
 
@@ -364,7 +398,7 @@ export default function PayPage() {
           </ol>
           <div className="pp-actions">
             {order.upi_payload && (
-              <a href={order.upi_payload} className="pp-btn primary">Pay with UPI app</a>
+              <a href={order.upi_payload} onClick={onLaunchUpi} className="pp-btn primary">Pay with UPI app</a>
             )}
             <button className="pp-btn ghost" onClick={copyUpi}>{copied ? 'Copied ✓' : 'Copy link'}</button>
           </div>
