@@ -56,6 +56,42 @@ CREATE INDEX IF NOT EXISTS idx_gw_orders_client ON gw_orders(user_id, client_ord
 
 ALTER TABLE gw_orders ADD COLUMN IF NOT EXISTS public_token VARCHAR(48);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_gw_orders_public_token ON gw_orders(public_token);
+
+-- Production hardening additions ---------------------------------------------
+
+-- Idempotency-Key support for create-order
+ALTER TABLE gw_orders ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(80);
+ALTER TABLE gw_orders ADD COLUMN IF NOT EXISTS idempotency_fingerprint VARCHAR(64);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gw_orders_idemkey
+  ON gw_orders(user_id, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+
+-- Callback retry / backoff bookkeeping
+ALTER TABLE gw_orders ADD COLUMN IF NOT EXISTS callback_attempts INTEGER DEFAULT 0 NOT NULL;
+ALTER TABLE gw_orders ADD COLUMN IF NOT EXISTS callback_next_attempt_at TIMESTAMPTZ;
+ALTER TABLE gw_orders ADD COLUMN IF NOT EXISTS callback_last_error TEXT;
+
+-- Index for the background reconciler (pending orders + due callbacks)
+CREATE INDEX IF NOT EXISTS idx_gw_orders_pending_expires
+  ON gw_orders(status, expires_at) WHERE status='pending';
+CREATE INDEX IF NOT EXISTS idx_gw_orders_callback_due
+  ON gw_orders(callback_next_attempt_at)
+  WHERE status='paid' AND callback_url IS NOT NULL AND callback_sent=FALSE;
+
+-- Append-only audit log for order lifecycle visibility
+CREATE TABLE IF NOT EXISTS gw_order_events (
+  id BIGSERIAL PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES gw_orders(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES gw_users(id) ON DELETE CASCADE,
+  event VARCHAR(64) NOT NULL,
+  status_before VARCHAR(20),
+  status_after VARCHAR(20),
+  message TEXT,
+  meta JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_gw_order_events_order ON gw_order_events(order_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_gw_order_events_user_created ON gw_order_events(user_id, created_at DESC);
 `;
 
 export async function runGatewayMigrations(): Promise<void> {

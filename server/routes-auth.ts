@@ -4,11 +4,14 @@ import crypto from 'crypto';
 import pool from './db';
 import { gwSession, GwSessionRequest, signGwToken } from './auth-mw';
 import { apiError, apiSuccess, methodNotAllowed } from './api-response';
+import { rateLimit, clientIp } from './rate-limit';
 
 const router = express.Router();
 
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,32}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PASSWORD_MIN = 8;
+const PASSWORD_MAX = 128;
 
 // Unambiguous base58-style alphabet (no 0, O, I, l, 1)
 const TOKEN_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
@@ -30,11 +33,72 @@ async function genUniqueToken(): Promise<string> {
     const r = await pool.query('SELECT 1 FROM gw_users WHERE api_token=$1 LIMIT 1', [t]);
     if (!r.rows[0]) return t;
   }
-  // Fallback: extra entropy if the unlikely happens
   return TOKEN_PREFIX + crypto.randomBytes(12).toString('hex').slice(0, TOKEN_BODY_LEN);
 }
 
-router.post('/register', async (req, res) => {
+/* -------------------------------------------------------------------------- */
+/* Rate limiters                                                               */
+/* -------------------------------------------------------------------------- */
+
+const registerLimiter = rateLimit({
+  name: 'auth_register',
+  windowMs: 60 * 60_000, // 1h
+  max: 8,
+  message: 'Too many registration attempts. Please try later.',
+  code: 'RATE_LIMITED_REGISTER',
+});
+
+// Per-IP login limit (loose)
+const loginLimiterIp = rateLimit({
+  name: 'auth_login_ip',
+  windowMs: 15 * 60_000,
+  max: 30,
+  message: 'Too many login attempts. Please wait a few minutes.',
+  code: 'RATE_LIMITED_LOGIN',
+});
+
+// Per-(IP, username) limit (tight) — burns an attempt only when wrong creds
+const loginFailureStore = new Map<string, number[]>();
+const LOGIN_FAIL_WINDOW = 10 * 60_000;
+const LOGIN_FAIL_MAX = 6;
+
+function loginFailureKey(ip: string, identifier: string): string {
+  return ip + '::' + identifier.toLowerCase();
+}
+function recordLoginFailure(key: string): void {
+  const now = Date.now();
+  const arr = loginFailureStore.get(key) || [];
+  while (arr.length && arr[0] < now - LOGIN_FAIL_WINDOW) arr.shift();
+  arr.push(now);
+  loginFailureStore.set(key, arr);
+}
+function clearLoginFailures(key: string): void {
+  loginFailureStore.delete(key);
+}
+function loginIsLocked(key: string): { locked: boolean; retryAfter?: number } {
+  const now = Date.now();
+  const arr = loginFailureStore.get(key) || [];
+  while (arr.length && arr[0] < now - LOGIN_FAIL_WINDOW) arr.shift();
+  if (arr.length >= LOGIN_FAIL_MAX) {
+    return { locked: true, retryAfter: Math.ceil((arr[0] + LOGIN_FAIL_WINDOW - now) / 1000) };
+  }
+  return { locked: false };
+}
+
+const tokenGenLimiter = rateLimit({
+  name: 'auth_token_gen',
+  windowMs: 60 * 60_000,
+  max: 10,
+  scope: (req) => String((req as GwSessionRequest).gwUser?.id || ''),
+  message: 'Too many token generation requests. Please wait.',
+  code: 'RATE_LIMITED_TOKEN_GEN',
+});
+
+/* -------------------------------------------------------------------------- */
+/* Routes                                                                      */
+/* -------------------------------------------------------------------------- */
+
+router.post('/register', registerLimiter, async (req, res) => {
   try {
     const username = String(req.body.username || '').trim();
     const email = String(req.body.email || '').trim().toLowerCase();
@@ -42,22 +106,24 @@ router.post('/register', async (req, res) => {
     const confirm = String(req.body.confirm_password || req.body.confirmPassword || '');
 
     if (!USERNAME_RE.test(username)) return apiError(res, 400, 'Username must be 3-32 chars (letters, digits, _)', 'VALIDATION_ERROR', { field: 'username' });
-    if (!EMAIL_RE.test(email)) return apiError(res, 400, 'Invalid email', 'VALIDATION_ERROR', { field: 'email' });
-    if (password.length < 8) return apiError(res, 400, 'Password must be at least 8 characters', 'VALIDATION_ERROR', { field: 'password' });
+    if (email.length > 255 || !EMAIL_RE.test(email)) return apiError(res, 400, 'Invalid email', 'VALIDATION_ERROR', { field: 'email' });
+    if (password.length < PASSWORD_MIN) return apiError(res, 400, `Password must be at least ${PASSWORD_MIN} characters`, 'VALIDATION_ERROR', { field: 'password' });
+    if (password.length > PASSWORD_MAX) return apiError(res, 400, `Password too long`, 'VALIDATION_ERROR', { field: 'password' });
     if (password !== confirm) return apiError(res, 400, 'Passwords do not match', 'VALIDATION_ERROR', { field: 'confirm_password' });
 
     const dup = await pool.query(
-      'SELECT username, email FROM gw_users WHERE username=$1 OR email=$2 LIMIT 1',
+      'SELECT username, email FROM gw_users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($2) LIMIT 1',
       [username, email],
     );
     if (dup.rows[0]) {
       const r = dup.rows[0];
-      if (r.username === username) return apiError(res, 409, 'Username already taken', 'USERNAME_EXISTS', { field: 'username' });
+      if (String(r.username).toLowerCase() === username.toLowerCase()) {
+        return apiError(res, 409, 'Username already taken', 'USERNAME_EXISTS', { field: 'username' });
+      }
       return apiError(res, 409, 'Email already registered', 'EMAIL_EXISTS', { field: 'email' });
     }
 
     const hash = await bcrypt.hash(password, 10);
-    // No API token at registration. User must save settings, then generate.
     const ins = await pool.query(
       `INSERT INTO gw_users (username, email, password_hash, api_token, api_token_created_at)
        VALUES ($1,$2,$3,NULL,NULL)
@@ -75,27 +141,39 @@ router.post('/register', async (req, res) => {
   }
 });
 
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiterIp, async (req, res) => {
   try {
-    const username = String(req.body.username || '').trim();
-    const password = String(req.body.password || '');
-    if (!username || !password) return apiError(res, 400, 'Username and password required', 'VALIDATION_ERROR');
+    const identifierRaw = String(req.body.username || '').trim().slice(0, 255);
+    const password = String(req.body.password || '').slice(0, PASSWORD_MAX + 1);
+    if (!identifierRaw || !password) return apiError(res, 400, 'Username and password required', 'VALIDATION_ERROR');
 
-    const r = await pool.query(
-      'SELECT id, username, password_hash, status FROM gw_users WHERE username=$1 OR email=$1 LIMIT 1',
-      [username.toLowerCase()],
-    );
-    let user = r.rows[0];
-    if (!user) {
-      const r2 = await pool.query('SELECT id, username, password_hash, status FROM gw_users WHERE username=$1 LIMIT 1', [username]);
-      user = r2.rows[0];
+    const ip = clientIp(req);
+    const failKey = loginFailureKey(ip, identifierRaw);
+    const lock = loginIsLocked(failKey);
+    if (lock.locked) {
+      res.setHeader('Retry-After', String(lock.retryAfter || 60));
+      return apiError(res, 429, 'Too many failed attempts. Try again later.', 'RATE_LIMITED_LOGIN', { retry_after_seconds: lock.retryAfter });
     }
-    if (!user) return apiError(res, 401, 'Invalid credentials', 'INVALID_CREDENTIALS');
-    if (user.status !== 'active') return apiError(res, 403, 'Account inactive', 'ACCOUNT_INACTIVE');
 
-    const ok = await bcrypt.compare(password, user.password_hash);
-    if (!ok) return apiError(res, 401, 'Invalid credentials', 'INVALID_CREDENTIALS');
+    // Single, case-insensitive lookup against either username or email
+    const r = await pool.query(
+      'SELECT id, username, password_hash, status FROM gw_users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($1) LIMIT 1',
+      [identifierRaw],
+    );
+    const user = r.rows[0];
+    // Constant-ish work whether the user exists or not (avoid trivial enumeration timing)
+    const hash = user?.password_hash || '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalid.';
+    const ok = await bcrypt.compare(password, hash);
 
+    if (!user || !ok) {
+      recordLoginFailure(failKey);
+      return apiError(res, 401, 'Invalid credentials', 'INVALID_CREDENTIALS');
+    }
+    if (user.status !== 'active') {
+      return apiError(res, 403, 'Account inactive', 'ACCOUNT_INACTIVE');
+    }
+
+    clearLoginFailures(failKey);
     const token = signGwToken({ id: user.id, username: user.username });
     apiSuccess(res, 'Login successful', { token, username: user.username });
   } catch (e) {
@@ -131,8 +209,8 @@ async function generateOrRegenerate(req: GwSessionRequest, res: Response) {
   apiSuccess(res, 'API token ready', { api_token: newToken, api_token_created_at: new Date().toISOString() });
 }
 
-router.post('/regenerate-token', gwSession, generateOrRegenerate);
-router.post('/generate-token', gwSession, generateOrRegenerate);
+router.post('/regenerate-token', gwSession, tokenGenLimiter, generateOrRegenerate);
+router.post('/generate-token', gwSession, tokenGenLimiter, generateOrRegenerate);
 
 router.get('/token', gwSession, async (req: GwSessionRequest, res: Response) => {
   const r = await pool.query('SELECT api_token, api_token_created_at FROM gw_users WHERE id=$1', [req.gwUser!.id]);

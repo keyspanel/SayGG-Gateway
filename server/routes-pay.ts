@@ -1,26 +1,84 @@
 import express, { Request, Response } from 'express';
 import QRCode from 'qrcode';
-import pool from './db';
 import {
   loadOrderByToken,
   loadMerchant,
   refreshOrderFromGateway,
   shapeOrder,
-  isExpired,
 } from './order-pay-helpers';
 import { subscribeOrder, publishOrderSnapshot } from './order-events';
 import { apiError, apiSuccess, methodNotAllowed } from './api-response';
+import { rateLimit, tryAcquireConcurrent, releaseConcurrent, clientIp } from './rate-limit';
+import { isValidPublicToken } from './validation';
+import { transitionOrder, isOrderExpiredAt } from './order-state';
+import { logOrderEvent } from './audit';
 
 const router = express.Router();
 
-router.get('/:token', async (req: Request, res: Response) => {
+/* -------------------------------------------------------------------------- */
+/* Rate limiters for the public hosted page                                   */
+/* -------------------------------------------------------------------------- */
+
+const payGetLimiter = rateLimit({
+  name: 'pay_get',
+  windowMs: 60_000,
+  max: 120, // 2/sec per IP
+  message: 'Too many requests. Please slow down.',
+  code: 'RATE_LIMITED_PAY',
+});
+const payRefreshLimiter = rateLimit({
+  name: 'pay_refresh',
+  windowMs: 60_000,
+  max: 30, // 1 every 2s per IP
+  message: 'Too many refresh requests. Please wait.',
+  code: 'RATE_LIMITED_PAY_REFRESH',
+});
+const sseConnectLimiter = rateLimit({
+  name: 'pay_sse_connect',
+  windowMs: 60_000,
+  max: 30,
+  message: 'Too many connection attempts. Please wait.',
+  code: 'RATE_LIMITED_PAY_STREAM',
+});
+const qrLimiter = rateLimit({
+  name: 'pay_qr',
+  windowMs: 60_000,
+  max: 60,
+  message: 'Too many QR requests. Please wait.',
+  code: 'RATE_LIMITED_PAY_QR',
+});
+
+const SSE_PER_IP_MAX = 6;
+
+/* -------------------------------------------------------------------------- */
+/* Token guard                                                                 */
+/* -------------------------------------------------------------------------- */
+
+function tokenGuard(req: Request, res: Response, next: express.NextFunction) {
+  if (!isValidPublicToken(req.params.token)) {
+    apiError(res, 404, 'Payment link not found or invalid', 'PAYMENT_LINK_NOT_FOUND');
+    return;
+  }
+  next();
+}
+
+/* -------------------------------------------------------------------------- */
+/* Routes                                                                      */
+/* -------------------------------------------------------------------------- */
+
+router.get('/:token', tokenGuard, payGetLimiter, async (req: Request, res: Response) => {
   try {
     let order = await loadOrderByToken(req.params.token);
     if (!order) return apiError(res, 404, 'Payment link not found or invalid', 'PAYMENT_LINK_NOT_FOUND');
 
-    if (order.status === 'pending' && isExpired(order)) {
-      await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1`, [order.id]);
-      order.status = 'expired';
+    if (order.status === 'pending' && isOrderExpiredAt(order.expires_at)) {
+      const t = await transitionOrder({
+        orderId: order.id,
+        to: 'expired',
+        event: 'order.expired',
+        meta: { source: 'pay_get' },
+      });
+      if (t.changed && t.row) order = t.row;
     }
     const cfg = await loadMerchant(order.user_id);
     const snap = shapeOrder(order, cfg);
@@ -32,18 +90,24 @@ router.get('/:token', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/:token/refresh', async (req: Request, res: Response) => {
+router.post('/:token/refresh', tokenGuard, payRefreshLimiter, async (req: Request, res: Response) => {
   try {
     let order = await loadOrderByToken(req.params.token);
     if (!order) return apiError(res, 404, 'Payment link not found or invalid', 'PAYMENT_LINK_NOT_FOUND');
 
     const cfg = await loadMerchant(order.user_id);
     if (cfg && order.status === 'pending') {
+      logOrderEvent({ order_id: order.id, user_id: order.user_id, event: 'order.refresh_hosted' }).catch(() => {});
       order = await refreshOrderFromGateway(order, cfg);
     }
-    if (order.status === 'pending' && isExpired(order)) {
-      await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1`, [order.id]);
-      order.status = 'expired';
+    if (order.status === 'pending' && isOrderExpiredAt(order.expires_at)) {
+      const t = await transitionOrder({
+        orderId: order.id,
+        to: 'expired',
+        event: 'order.expired',
+        meta: { source: 'pay_refresh' },
+      });
+      if (t.changed && t.row) order = t.row;
     }
     const snap = shapeOrder(order, cfg);
     publishOrderSnapshot(order.public_token, snap);
@@ -56,16 +120,19 @@ router.post('/:token/refresh', async (req: Request, res: Response) => {
 
 /**
  * Server-Sent Events stream for one hosted payment page.
- *
- * - Subscribes to a per-token channel; only this order's snapshots are sent.
- * - First sends the current snapshot immediately so the client never shows stale state.
- * - Keep-alive comment every 25s to keep proxies from idling the connection.
- * - Closes itself once the order reaches a terminal state — the client stops trying to reconnect.
+ * Per-IP concurrent-connection cap + per-IP connect-rate cap.
  */
-router.get('/:token/stream', async (req: Request, res: Response) => {
+router.get('/:token/stream', tokenGuard, sseConnectLimiter, async (req: Request, res: Response) => {
   const token = req.params.token;
+  const ip = clientIp(req);
+
+  if (!tryAcquireConcurrent('pay_sse', ip, SSE_PER_IP_MAX)) {
+    return apiError(res, 429, 'Too many open connections from this client.', 'SSE_TOO_MANY', { retry_after_seconds: 30 });
+  }
+
   const order = await loadOrderByToken(token);
   if (!order) {
+    releaseConcurrent('pay_sse', ip);
     return apiError(res, 404, 'Payment link not found or invalid', 'PAYMENT_LINK_NOT_FOUND');
   }
 
@@ -86,22 +153,29 @@ router.get('/:token/stream', async (req: Request, res: Response) => {
 
   // Initial snapshot — auto-expire if needed before sending.
   let initial = order;
-  if (initial.status === 'pending' && isExpired(initial)) {
-    await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1`, [initial.id]).catch(() => {});
-    initial.status = 'expired';
+  if (initial.status === 'pending' && isOrderExpiredAt(initial.expires_at)) {
+    const t = await transitionOrder({
+      orderId: initial.id,
+      to: 'expired',
+      event: 'order.expired',
+      meta: { source: 'sse_open' },
+    });
+    if (t.changed && t.row) initial = t.row;
   }
   const cfg = await loadMerchant(initial.user_id);
   const initialSnap = shapeOrder(initial, cfg);
   send('snapshot', initialSnap);
 
-  // If already terminal, send a close hint and end — no need to keep a connection open.
   if (initialSnap.is_terminal) {
     send('end', { reason: 'terminal' });
     res.end();
+    releaseConcurrent('pay_sse', ip);
     return;
   }
 
-  // Subscribe to live updates.
+  logOrderEvent({ order_id: initial.id, user_id: initial.user_id, event: 'sse.connect' }).catch(() => {});
+
+  let cleaned = false;
   const unsubscribe = subscribeOrder(token, (snap) => {
     send('update', snap);
     if (snap.is_terminal) {
@@ -110,21 +184,24 @@ router.get('/:token/stream', async (req: Request, res: Response) => {
     }
   });
 
-  // Keep-alive ping.
   const ping = setInterval(() => {
     try { res.write(`: ping ${Date.now()}\n\n`); } catch { /* noop */ }
-  }, 25000);
+  }, 25_000);
 
   const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
     clearInterval(ping);
     try { unsubscribe(); } catch { /* noop */ }
+    releaseConcurrent('pay_sse', ip);
+    logOrderEvent({ order_id: initial.id, user_id: initial.user_id, event: 'sse.disconnect' }).catch(() => {});
   };
   req.on('close', cleanup);
   req.on('aborted', cleanup);
   res.on('close', cleanup);
 });
 
-router.get('/:token/qr.png', async (req: Request, res: Response) => {
+router.get('/:token/qr.png', tokenGuard, qrLimiter, async (req: Request, res: Response) => {
   try {
     const order = await loadOrderByToken(req.params.token);
     if (!order || !order.upi_payload) {

@@ -1,6 +1,8 @@
 import pool from './db';
 import { verifyPaytmPayment, classifyVerificationForPoll } from './paytm';
 import { sendOrderCallback } from './callback';
+import { transitionOrder, isOrderExpiredAt } from './order-state';
+import { logOrderEvent } from './audit';
 
 export interface OrderRow {
   id: number;
@@ -33,6 +35,7 @@ export interface MerchantCfg {
 
 export async function loadOrderByToken(token: string): Promise<OrderRow | null> {
   if (!token || token.length < 16 || token.length > 48) return null;
+  if (!/^[A-Za-z0-9_\-]+$/.test(token)) return null;
   const r = await pool.query<OrderRow>(
     `SELECT * FROM gw_orders WHERE public_token=$1 LIMIT 1`,
     [token],
@@ -50,7 +53,7 @@ export async function loadMerchant(userId: number): Promise<MerchantCfg | null> 
 }
 
 export function isExpired(o: OrderRow): boolean {
-  return !!o.expires_at && new Date(o.expires_at).getTime() < Date.now();
+  return isOrderExpiredAt(o.expires_at);
 }
 
 export function shapeOrder(o: OrderRow, cfg: MerchantCfg | null) {
@@ -68,13 +71,14 @@ export function shapeOrder(o: OrderRow, cfg: MerchantCfg | null) {
     expires_at: o.expires_at,
     verified_at: o.verified_at,
     is_terminal: ['paid', 'failed', 'expired', 'cancelled'].includes(o.status),
-    is_expired: isExpired(o),
+    is_expired: isOrderExpiredAt(o.expires_at),
     bank_rrn: o.gateway_bank_txn_id,
   };
 }
 
 /**
- * Re-verify a pending order against Paytm and persist any state change.
+ * Re-verify a pending order against Paytm and persist any state change
+ * via the central state machine (CAS-safe, audited, callback-triggering).
  * Returns the latest order row. Never terminalizes on transient errors.
  */
 export async function refreshOrderFromGateway(o: OrderRow, cfg: MerchantCfg | null): Promise<OrderRow> {
@@ -82,14 +86,14 @@ export async function refreshOrderFromGateway(o: OrderRow, cfg: MerchantCfg | nu
 
   if (!cfg?.paytm_merchant_id || !cfg?.paytm_merchant_key) {
     if (isExpired(o)) {
-      await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1`, [o.id]);
-      const r2 = await pool.query<OrderRow>(`SELECT * FROM gw_orders WHERE id=$1`, [o.id]);
-      return r2.rows[0] || o;
+      const t = await transitionOrder({ orderId: o.id, to: 'expired', event: 'order.expired', meta: { source: 'refresh_no_creds' } });
+      if (t.changed && t.row) return t.row as OrderRow;
     }
     return o;
   }
 
   try {
+    logOrderEvent({ order_id: o.id, user_id: o.user_id, event: 'order.verify_attempt', meta: { source: 'refresh' } }).catch(() => {});
     const verify = await verifyPaytmPayment(
       { merchant_id: cfg.paytm_merchant_id, merchant_key: cfg.paytm_merchant_key, env: cfg.paytm_env || 'production' },
       o.txn_ref,
@@ -98,26 +102,44 @@ export async function refreshOrderFromGateway(o: OrderRow, cfg: MerchantCfg | nu
     const decision = classifyVerificationForPoll(verify);
 
     if (decision === 'paid') {
-      await pool.query(
-        `UPDATE gw_orders SET status='paid', verified_at=NOW(), gateway_txn_id=$1, gateway_bank_txn_id=$2, raw_gateway_response=$3, updated_at=NOW() WHERE id=$4 AND status='pending'`,
-        [verify.txn_id || null, verify.bank_txn_id || null, JSON.stringify(verify.raw || {}).slice(0, 4000), o.id],
-      );
-      sendOrderCallback(o.id).catch(() => {});
-    } else if (decision === 'failed') {
-      await pool.query(
-        `UPDATE gw_orders SET status='failed', updated_at=NOW(), raw_gateway_response=$1 WHERE id=$2 AND status='pending'`,
-        [JSON.stringify(verify.raw || {}).slice(0, 4000), o.id],
-      );
-    } else if (isExpired(o)) {
-      await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1 AND status='pending'`, [o.id]);
+      const t = await transitionOrder({
+        orderId: o.id,
+        to: 'paid',
+        fields: {
+          gateway_txn_id: verify.txn_id || null,
+          gateway_bank_txn_id: verify.bank_txn_id || null,
+          raw_gateway_response: JSON.stringify(verify.raw || {}).slice(0, 4000),
+        },
+        event: 'order.verify_paid',
+        meta: { source: 'refresh' },
+      });
+      if (t.changed && t.row) {
+        sendOrderCallback(o.id).catch(() => {});
+        return t.row as OrderRow;
+      }
+      const r2 = await pool.query<OrderRow>(`SELECT * FROM gw_orders WHERE id=$1`, [o.id]);
+      return r2.rows[0] || o;
+    }
+    if (decision === 'failed') {
+      const t = await transitionOrder({
+        orderId: o.id,
+        to: 'failed',
+        fields: { raw_gateway_response: JSON.stringify(verify.raw || {}).slice(0, 4000) },
+        event: 'order.verify_failed',
+        meta: { source: 'refresh' },
+      });
+      if (t.changed && t.row) return t.row as OrderRow;
+    }
+    if (isExpired(o)) {
+      const t = await transitionOrder({ orderId: o.id, to: 'expired', event: 'order.expired', meta: { source: 'refresh' } });
+      if (t.changed && t.row) return t.row as OrderRow;
     }
     const r2 = await pool.query<OrderRow>(`SELECT * FROM gw_orders WHERE id=$1`, [o.id]);
     return r2.rows[0] || o;
   } catch {
     if (isExpired(o)) {
-      await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1 AND status='pending'`, [o.id]);
-      const r2 = await pool.query<OrderRow>(`SELECT * FROM gw_orders WHERE id=$1`, [o.id]);
-      return r2.rows[0] || o;
+      const t = await transitionOrder({ orderId: o.id, to: 'expired', event: 'order.expired', meta: { source: 'refresh_error' } });
+      if (t.changed && t.row) return t.row as OrderRow;
     }
     return o;
   }
