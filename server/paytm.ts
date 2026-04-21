@@ -32,18 +32,37 @@ export function buildUniqueTxnRef(suffix: number | string = ''): string {
 }
 
 /**
+ * Encode a UPI query-parameter value safely.
+ *
+ * Differences from encodeURIComponent:
+ *   - `@` is left LITERAL. Per RFC 3986, `@` is a valid query character
+ *     (it is in the `pchar` set). Some Android UPI apps (notably older
+ *     Paytm, BHIM, and some PhonePe builds) do NOT percent-decode the
+ *     `pa` value before sending it to NPCI when the URI arrives via
+ *     `Intent.ACTION_VIEW`. If `pa` arrives as `paytm.x%40pty`, NPCI
+ *     receives the literal VPA `paytm.x%40pty` and responds "Receiver
+ *     UPI ID or VPA is NOT Available" — exactly the symptom we are
+ *     fixing. Scanning the QR uses the in-app QR pipeline which decodes
+ *     properly, which is why the QR path appeared to work.
+ *
+ * All other characters that need percent-encoding (including space,
+ * which becomes %20) are still encoded. This produces a strictly
+ * RFC 3986-valid URI that matches the format real-world merchant UPI
+ * QRs and deep links use in production.
+ */
+function upiEncode(value: string): string {
+  return encodeURIComponent(value).replace(/%40/g, '@');
+}
+
+/**
  * Builds the canonical UPI deep-link payload used for BOTH:
  *   - the QR image rendered on the hosted pay page
  *   - the "Pay with UPI app" anchor href on the hosted pay page
  *
- * IMPORTANT: We must NOT use URLSearchParams here. URLSearchParams encodes
- * spaces as `+` (application/x-www-form-urlencoded). UPI apps parse
- * `upi://pay?...` with strict RFC 3986 rules where `+` is a literal `+`,
- * not a space. That breaks query parsing in GPay/PhonePe and surfaces as
- * "Receiver UPI ID or VPA is NOT available" on the direct app-launch path.
- *
- * Per-parameter encodeURIComponent gives us `%20` for spaces and `%40` for
- * `@`, both of which are valid and accepted by every UPI app.
+ * Both paths consume this exact same string. There is intentionally
+ * NO separate "QR payload" vs "launch payload" — splitting them would
+ * be a foot-gun and is not needed: the format below is valid for QR
+ * scanners AND for Android intent handoff.
  */
 export function buildUpiPayload(opts: {
   upi_id: string;
@@ -57,13 +76,14 @@ export function buildUpiPayload(opts: {
   const pn = (opts.payee_name || '').trim();
   const tr = (opts.txn_ref || '').trim();
   const tn = (opts.note || `Order ${tr}`).trim();
+  // Standard UPI parameter order used by Paytm/Razorpay/PhonePe merchant QRs.
   const parts = [
-    `pa=${encodeURIComponent(pa)}`,
-    `pn=${encodeURIComponent(pn)}`,
-    `am=${encodeURIComponent(amount)}`,
+    `pa=${upiEncode(pa)}`,
+    `pn=${upiEncode(pn)}`,
+    `am=${upiEncode(amount)}`,
     `cu=INR`,
-    `tr=${encodeURIComponent(tr)}`,
-    `tn=${encodeURIComponent(tn)}`,
+    `tr=${upiEncode(tr)}`,
+    `tn=${upiEncode(tn)}`,
   ];
   return `upi://pay?${parts.join('&')}`;
 }
