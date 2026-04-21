@@ -1,133 +1,17 @@
 import express, { Request, Response } from 'express';
 import QRCode from 'qrcode';
 import pool from './db';
-import { verifyPaytmPayment, classifyVerificationForPoll } from './paytm';
-import { sendOrderCallback } from './callback';
+import {
+  loadOrderByToken,
+  loadMerchant,
+  refreshOrderFromGateway,
+  shapeOrder,
+  isExpired,
+} from './order-pay-helpers';
+import { subscribeOrder, publishOrderSnapshot } from './order-events';
 import { apiError, apiSuccess, methodNotAllowed } from './api-response';
 
 const router = express.Router();
-
-interface OrderRow {
-  id: number;
-  user_id: number;
-  status: string;
-  amount: string;
-  currency: string;
-  txn_ref: string;
-  client_order_id: string | null;
-  upi_payload: string | null;
-  payment_link: string | null;
-  created_at: Date;
-  expires_at: Date | null;
-  verified_at: Date | null;
-  callback_url: string | null;
-  callback_sent: boolean;
-  gateway_txn_id: string | null;
-  gateway_bank_txn_id: string | null;
-  public_token: string | null;
-  note: string | null;
-}
-
-interface MerchantCfg {
-  paytm_upi_id: string | null;
-  paytm_merchant_id: string | null;
-  paytm_merchant_key: string | null;
-  paytm_env: string | null;
-  payee_name: string | null;
-}
-
-async function loadOrderByToken(token: string): Promise<OrderRow | null> {
-  if (!token || token.length < 16 || token.length > 48) return null;
-  const r = await pool.query<OrderRow>(
-    `SELECT * FROM gw_orders WHERE public_token=$1 LIMIT 1`,
-    [token],
-  );
-  return r.rows[0] || null;
-}
-
-async function loadMerchant(userId: number): Promise<MerchantCfg | null> {
-  const r = await pool.query<MerchantCfg>(
-    `SELECT paytm_upi_id, paytm_merchant_id, paytm_merchant_key, paytm_env, payee_name
-       FROM gw_settings WHERE user_id=$1`,
-    [userId],
-  );
-  return r.rows[0] || null;
-}
-
-function isExpired(o: OrderRow): boolean {
-  return !!o.expires_at && new Date(o.expires_at).getTime() < Date.now();
-}
-
-async function maybeRefreshFromGateway(o: OrderRow, cfg: MerchantCfg): Promise<OrderRow> {
-  if (o.status !== 'pending') return o;
-  if (!cfg.paytm_merchant_id || !cfg.paytm_merchant_key) {
-    // No creds to verify with — only expiry can finalize the order.
-    if (isExpired(o)) {
-      await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1`, [o.id]);
-      const r2 = await pool.query<OrderRow>(`SELECT * FROM gw_orders WHERE id=$1`, [o.id]);
-      return r2.rows[0] || o;
-    }
-    return o;
-  }
-
-  try {
-    const verify = await verifyPaytmPayment(
-      { merchant_id: cfg.paytm_merchant_id, merchant_key: cfg.paytm_merchant_key, env: cfg.paytm_env || 'production' },
-      o.txn_ref,
-      parseFloat(o.amount),
-    );
-    const decision = classifyVerificationForPoll(verify);
-
-    if (decision === 'paid') {
-      await pool.query(
-        `UPDATE gw_orders SET status='paid', verified_at=NOW(), gateway_txn_id=$1, gateway_bank_txn_id=$2, raw_gateway_response=$3, updated_at=NOW() WHERE id=$4`,
-        [verify.txn_id || null, verify.bank_txn_id || null, JSON.stringify(verify.raw || {}).slice(0, 4000), o.id],
-      );
-      sendOrderCallback(o.id).catch(() => {});
-    } else if (decision === 'failed') {
-      // Only true terminal failure (e.g. amount mismatch with a confirmed
-      // TXN_SUCCESS for the wrong amount). Pending verification, network
-      // errors, no_record, etc. are NEVER terminalized here.
-      await pool.query(
-        `UPDATE gw_orders SET status='failed', updated_at=NOW(), raw_gateway_response=$1 WHERE id=$2`,
-        [JSON.stringify(verify.raw || {}).slice(0, 4000), o.id],
-      );
-    } else if (isExpired(o)) {
-      await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1`, [o.id]);
-    }
-    // Otherwise: stay pending. The user may still pay; we'll check again next poll.
-    const r2 = await pool.query<OrderRow>(`SELECT * FROM gw_orders WHERE id=$1`, [o.id]);
-    return r2.rows[0] || o;
-  } catch {
-    // Network/gateway hiccup — stay pending, never failed.
-    if (isExpired(o)) {
-      await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1`, [o.id]);
-      const r2 = await pool.query<OrderRow>(`SELECT * FROM gw_orders WHERE id=$1`, [o.id]);
-      return r2.rows[0] || o;
-    }
-    return o;
-  }
-}
-
-function shape(o: OrderRow, cfg: MerchantCfg | null) {
-  return {
-    public_token: o.public_token,
-    txn_ref: o.txn_ref,
-    client_order_id: o.client_order_id,
-    amount: parseFloat(o.amount),
-    currency: o.currency,
-    status: o.status,
-    note: o.note,
-    payee_name: cfg?.payee_name || 'Merchant',
-    upi_payload: o.upi_payload,
-    created_at: o.created_at,
-    expires_at: o.expires_at,
-    verified_at: o.verified_at,
-    is_terminal: ['paid', 'failed', 'expired', 'cancelled'].includes(o.status),
-    is_expired: isExpired(o),
-    bank_rrn: o.gateway_bank_txn_id,
-  };
-}
 
 router.get('/:token', async (req: Request, res: Response) => {
   try {
@@ -139,7 +23,9 @@ router.get('/:token', async (req: Request, res: Response) => {
       order.status = 'expired';
     }
     const cfg = await loadMerchant(order.user_id);
-    return apiSuccess(res, 'Order loaded', shape(order, cfg));
+    const snap = shapeOrder(order, cfg);
+    publishOrderSnapshot(order.public_token, snap);
+    return apiSuccess(res, 'Order loaded', snap);
   } catch (e) {
     console.error('[pay/get]', e);
     return apiError(res, 500, 'Failed to load payment link', 'INTERNAL_SERVER_ERROR');
@@ -153,17 +39,89 @@ router.post('/:token/refresh', async (req: Request, res: Response) => {
 
     const cfg = await loadMerchant(order.user_id);
     if (cfg && order.status === 'pending') {
-      order = await maybeRefreshFromGateway(order, cfg);
+      order = await refreshOrderFromGateway(order, cfg);
     }
     if (order.status === 'pending' && isExpired(order)) {
       await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1`, [order.id]);
       order.status = 'expired';
     }
-    return apiSuccess(res, 'Status refreshed', shape(order, cfg));
+    const snap = shapeOrder(order, cfg);
+    publishOrderSnapshot(order.public_token, snap);
+    return apiSuccess(res, 'Status refreshed', snap);
   } catch (e) {
     console.error('[pay/refresh]', e);
     return apiError(res, 500, 'Failed to refresh status', 'INTERNAL_SERVER_ERROR');
   }
+});
+
+/**
+ * Server-Sent Events stream for one hosted payment page.
+ *
+ * - Subscribes to a per-token channel; only this order's snapshots are sent.
+ * - First sends the current snapshot immediately so the client never shows stale state.
+ * - Keep-alive comment every 25s to keep proxies from idling the connection.
+ * - Closes itself once the order reaches a terminal state — the client stops trying to reconnect.
+ */
+router.get('/:token/stream', async (req: Request, res: Response) => {
+  const token = req.params.token;
+  const order = await loadOrderByToken(token);
+  if (!order) {
+    return apiError(res, 404, 'Payment link not found or invalid', 'PAYMENT_LINK_NOT_FOUND');
+  }
+
+  res.status(200).set({
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders?.();
+
+  const send = (event: string, data: unknown) => {
+    try {
+      res.write(`event: ${event}\n`);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    } catch { /* connection probably gone */ }
+  };
+
+  // Initial snapshot — auto-expire if needed before sending.
+  let initial = order;
+  if (initial.status === 'pending' && isExpired(initial)) {
+    await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1`, [initial.id]).catch(() => {});
+    initial.status = 'expired';
+  }
+  const cfg = await loadMerchant(initial.user_id);
+  const initialSnap = shapeOrder(initial, cfg);
+  send('snapshot', initialSnap);
+
+  // If already terminal, send a close hint and end — no need to keep a connection open.
+  if (initialSnap.is_terminal) {
+    send('end', { reason: 'terminal' });
+    res.end();
+    return;
+  }
+
+  // Subscribe to live updates.
+  const unsubscribe = subscribeOrder(token, (snap) => {
+    send('update', snap);
+    if (snap.is_terminal) {
+      send('end', { reason: 'terminal' });
+      try { res.end(); } catch { /* noop */ }
+    }
+  });
+
+  // Keep-alive ping.
+  const ping = setInterval(() => {
+    try { res.write(`: ping ${Date.now()}\n\n`); } catch { /* noop */ }
+  }, 25000);
+
+  const cleanup = () => {
+    clearInterval(ping);
+    try { unsubscribe(); } catch { /* noop */ }
+  };
+  req.on('close', cleanup);
+  req.on('aborted', cleanup);
+  res.on('close', cleanup);
 });
 
 router.get('/:token/qr.png', async (req: Request, res: Response) => {
@@ -191,6 +149,7 @@ router.get('/:token/qr.png', async (req: Request, res: Response) => {
 
 router.all('/:token', methodNotAllowed(['GET']));
 router.all('/:token/refresh', methodNotAllowed(['POST']));
+router.all('/:token/stream', methodNotAllowed(['GET']));
 router.all('/:token/qr.png', methodNotAllowed(['GET']));
 
 export default router;

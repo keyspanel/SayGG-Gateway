@@ -1470,6 +1470,16 @@ code {
   box-shadow: 0 0 0 4px var(--gw-primary-soft);
   animation: pp-pulse 1s ease-in-out infinite;
 }
+.pp-dot.live {
+  background: #16a34a;
+  box-shadow: 0 0 0 4px rgba(22, 163, 74, 0.18);
+  animation: pp-pulse 1.4s ease-in-out infinite;
+}
+.pp-dot.warn {
+  background: #d97706;
+  box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.18);
+  animation: pp-pulse 1.6s ease-in-out infinite;
+}
 .pp-link {
   margin-left: auto;
   background: none; border: none; padding: 0;

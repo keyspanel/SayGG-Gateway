@@ -19,12 +19,17 @@ interface PayOrder {
   bank_rrn: string | null;
 }
 
-function pollIntervalFor(elapsedMs: number): number {
-  if (elapsedMs < 60_000) return 5000;
-  if (elapsedMs < 5 * 60_000) return 8000;
-  if (elapsedMs < 15 * 60_000) return 15000;
-  return 30000;
+type LiveState = 'connecting' | 'live' | 'reconnecting' | 'fallback' | 'closed';
+
+/** Fallback polling cadence used only if the live stream is unavailable. */
+function fallbackInterval(elapsedMs: number): number {
+  if (elapsedMs < 60_000) return 6000;
+  if (elapsedMs < 5 * 60_000) return 10_000;
+  return 20_000;
 }
+
+/** Safety re-check interval when the live stream IS connected (belt + suspenders). */
+const SAFETY_POLL_MS = 45_000;
 
 async function fetchOrder(token: string, refresh = false): Promise<{ ok: boolean; status: number; data?: PayOrder; message?: string }> {
   try {
@@ -106,8 +111,22 @@ export default function PayPage() {
   const [now, setNow] = useState<number>(Date.now());
   const [checking, setChecking] = useState(false);
   const [copied, setCopied] = useState(false);
-  const startedAtRef = useRef<number>(Date.now());
+  const [live, setLive] = useState<LiveState>('connecting');
 
+  const startedAtRef = useRef<number>(Date.now());
+  const orderRef = useRef<PayOrder | null>(null);
+  orderRef.current = order;
+
+  // Apply a snapshot, but never let a stale "pending" overwrite a confirmed terminal state.
+  const applySnapshot = useCallback((next: PayOrder) => {
+    setOrder((prev) => {
+      if (prev?.is_terminal && !next.is_terminal) return prev;
+      if (prev && prev.status === next.status && prev.verified_at === next.verified_at) return prev;
+      return next;
+    });
+  }, []);
+
+  // Initial load.
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -115,42 +134,138 @@ export default function PayPage() {
       const r = await fetchOrder(token);
       if (cancelled) return;
       if (!r.ok || !r.data) setError(r.message || 'Unable to load payment link');
-      else setOrder(r.data);
+      else applySnapshot(r.data);
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [token]);
+  }, [token, applySnapshot]);
 
+  // 1Hz tick for the countdown only.
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
 
-  const pollOnce = useCallback(async () => {
+  // Manual / fallback re-verify against the gateway.
+  const refreshOnce = useCallback(async () => {
     if (!token) return;
     setChecking(true);
     const r = await fetchOrder(token, true);
-    if (r.ok && r.data) setOrder(r.data);
+    if (r.ok && r.data) applySnapshot(r.data);
     setChecking(false);
-  }, [token]);
+  }, [token, applySnapshot]);
 
+  /**
+   * Realtime: subscribe to the per-order SSE stream.
+   * - On message → instant state update.
+   * - On error → mark "reconnecting"; EventSource auto-retries.
+   * - If retries keep failing, a parallel fallback poller keeps things moving.
+   * - Closes itself once the order is terminal.
+   */
   useEffect(() => {
-    if (!order || order.is_terminal) return;
-    if (order.status !== 'pending') return;
-    let cancelled = false;
-    let timer: number | undefined;
-    const tick = async () => {
-      if (cancelled) return;
-      if (!document.hidden) {
-        await pollOnce();
-      }
-      if (cancelled) return;
-      const elapsed = Date.now() - startedAtRef.current;
-      timer = window.setTimeout(tick, pollIntervalFor(elapsed));
+    if (!token) return;
+    if (orderRef.current?.is_terminal) { setLive('closed'); return; }
+
+    let es: EventSource | null = null;
+    let closed = false;
+    let errorCount = 0;
+    let fallbackTimer: number | undefined;
+    let safetyTimer: number | undefined;
+
+    const stopFallback = () => {
+      if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = undefined; }
     };
-    timer = window.setTimeout(tick, pollIntervalFor(Date.now() - startedAtRef.current));
-    return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [order, pollOnce]);
+    const stopSafety = () => {
+      if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = undefined; }
+    };
+
+    const startFallback = () => {
+      stopFallback();
+      const tick = async () => {
+        if (closed) return;
+        if (orderRef.current?.is_terminal) return;
+        if (!document.hidden) await refreshOnce();
+        if (closed || orderRef.current?.is_terminal) return;
+        const elapsed = Date.now() - startedAtRef.current;
+        fallbackTimer = window.setTimeout(tick, fallbackInterval(elapsed));
+      };
+      fallbackTimer = window.setTimeout(tick, fallbackInterval(Date.now() - startedAtRef.current));
+    };
+
+    const startSafety = () => {
+      stopSafety();
+      const tick = async () => {
+        if (closed) return;
+        if (orderRef.current?.is_terminal) return;
+        if (!document.hidden) await refreshOnce();
+        if (closed || orderRef.current?.is_terminal) return;
+        safetyTimer = window.setTimeout(tick, SAFETY_POLL_MS);
+      };
+      safetyTimer = window.setTimeout(tick, SAFETY_POLL_MS);
+    };
+
+    const handleSnapshot = (raw: string) => {
+      try {
+        const data = JSON.parse(raw) as PayOrder;
+        applySnapshot(data);
+        if (data.is_terminal) {
+          stopFallback();
+          stopSafety();
+          setLive('closed');
+        }
+      } catch { /* ignore malformed frames */ }
+    };
+
+    try {
+      setLive('connecting');
+      es = new EventSource(`/api/pay/${token}/stream`);
+
+      es.addEventListener('snapshot', (ev: MessageEvent) => {
+        errorCount = 0;
+        setLive('live');
+        stopFallback();
+        startSafety();
+        handleSnapshot(ev.data);
+      });
+      es.addEventListener('update', (ev: MessageEvent) => {
+        errorCount = 0;
+        setLive('live');
+        handleSnapshot(ev.data);
+      });
+      es.addEventListener('end', () => {
+        try { es?.close(); } catch { /* noop */ }
+        stopFallback();
+        stopSafety();
+        setLive('closed');
+      });
+      es.onerror = () => {
+        errorCount += 1;
+        // Browser will auto-reconnect on its own. After repeated failures,
+        // engage the fallback poller so the user still gets updates.
+        if (es && es.readyState === EventSource.CLOSED) {
+          if (errorCount >= 3) {
+            setLive('fallback');
+            startFallback();
+          } else {
+            setLive('reconnecting');
+          }
+        } else {
+          setLive('reconnecting');
+          if (errorCount >= 3 && !fallbackTimer) startFallback();
+        }
+      };
+    } catch {
+      setLive('fallback');
+      startFallback();
+    }
+
+    return () => {
+      closed = true;
+      stopFallback();
+      stopSafety();
+      try { es?.close(); } catch { /* noop */ }
+    };
+  }, [token, refreshOnce, applySnapshot]);
 
   if (loading) {
     return (
@@ -184,8 +299,17 @@ export default function PayPage() {
     try { await navigator.clipboard.writeText(order.upi_payload); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
   };
 
-  const orderRef = order.client_order_id || order.txn_ref;
+  const orderRefId = order.client_order_id || order.txn_ref;
   const isPending = order.status === 'pending';
+
+  let liveLabel: string;
+  let liveClass: string;
+  if (checking) { liveLabel = 'Checking…'; liveClass = 'on'; }
+  else if (live === 'live') { liveLabel = 'Live · waiting for payment'; liveClass = 'live'; }
+  else if (live === 'connecting') { liveLabel = 'Connecting…'; liveClass = 'on'; }
+  else if (live === 'reconnecting') { liveLabel = 'Reconnecting…'; liveClass = 'warn'; }
+  else if (live === 'fallback') { liveLabel = 'Backup mode · checking periodically'; liveClass = 'warn'; }
+  else { liveLabel = 'Waiting for payment'; liveClass = ''; }
 
   return (
     <div className="pp-shell">
@@ -213,7 +337,7 @@ export default function PayPage() {
           <strong>₹{order.amount.toFixed(2)} <small>{order.currency}</small></strong>
         </div>
         <div className="pp-meta-row">
-          <div><b>Order</b><span>{orderRef}</span></div>
+          <div><b>Order</b><span>{orderRefId}</span></div>
           {order.note && <div><b>Note</b><span>{order.note}</span></div>}
           {showCountdown && (
             <div><b>Expires in</b><span className="pp-countdown">{formatTimeLeft(expiresMs)}</span></div>
@@ -245,9 +369,9 @@ export default function PayPage() {
             <button className="pp-btn ghost" onClick={copyUpi}>{copied ? 'Copied ✓' : 'Copy link'}</button>
           </div>
           <div className="pp-poll-row">
-            <span className={`pp-dot${checking ? ' on' : ''}`} />
-            {checking ? 'Checking…' : 'Waiting for payment'}
-            <button className="pp-link" onClick={pollOnce} disabled={checking}>Refresh</button>
+            <span className={`pp-dot ${liveClass}`} />
+            {liveLabel}
+            <button className="pp-link" onClick={refreshOnce} disabled={checking}>Refresh</button>
           </div>
         </div>
       )}
@@ -256,7 +380,7 @@ export default function PayPage() {
         <div className="pp-card pp-result">
           <StatusVisual order={order} />
           <div className="pp-meta-row">
-            <div><b>Order</b><span>{orderRef}</span></div>
+            <div><b>Order</b><span>{orderRefId}</span></div>
             <div><b>Amount</b><span>₹{order.amount.toFixed(2)}</span></div>
             {order.verified_at && <div><b>Confirmed</b><span>{new Date(order.verified_at).toLocaleString()}</span></div>}
           </div>

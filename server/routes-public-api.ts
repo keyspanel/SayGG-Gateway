@@ -4,6 +4,7 @@ import { gwApiToken, GwApiRequest } from './auth-mw';
 import crypto from 'crypto';
 import { buildUniqueTxnRef, buildUpiPayload, verifyPaytmPayment, classifyVerificationForPoll } from './paytm';
 import { sendOrderCallback } from './callback';
+import { publishOrderSnapshot } from './order-events';
 import { apiError, apiSuccess, methodNotAllowed } from './api-response';
 
 function genPublicToken(): string {
@@ -183,6 +184,26 @@ async function checkOrder(req: GwApiRequest, res: Response) {
     if (order.status === 'paid' && order.callback_url && !order.callback_sent) {
       sendOrderCallback(order.id).catch(() => {});
     }
+
+    // Push status into the per-order live channel so any hosted page open for
+    // this order updates instantly (no client-side wait for the next tick).
+    publishOrderSnapshot(order.public_token, {
+      public_token: order.public_token,
+      txn_ref: order.txn_ref,
+      client_order_id: order.client_order_id,
+      amount: parseFloat(order.amount),
+      currency: order.currency,
+      status: order.status,
+      note: order.note,
+      payee_name: null as any,
+      upi_payload: order.upi_payload,
+      created_at: order.created_at,
+      expires_at: order.expires_at,
+      verified_at: order.verified_at,
+      is_terminal: ['paid', 'failed', 'expired', 'cancelled'].includes(order.status),
+      is_expired: !!order.expires_at && new Date(order.expires_at).getTime() < Date.now(),
+      bank_rrn: order.gateway_bank_txn_id,
+    } as any);
 
     apiSuccess(res, 'Order status loaded', {
       order_id: order.id,
