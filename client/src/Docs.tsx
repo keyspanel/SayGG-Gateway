@@ -637,6 +637,39 @@ function TestConsole({ apiToken, baseUrl }: { apiToken: string; baseUrl: string 
               </Link>
             )}
           </div>
+          {createOut.ok && createOut.body?.data?.payment_page_url && (
+            <div className="gw-actions" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
+              <a
+                className="gw-btn-primary sm"
+                href={createOut.body.data.payment_page_url}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                Open hosted payment page ↗
+              </a>
+              <button
+                type="button"
+                className="gw-btn-ghost sm"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(createOut.body.data.payment_page_url);
+                  } catch {}
+                }}
+              >
+                Copy payment link
+              </button>
+              {createOut.body.data.qr_image_url && (
+                <a
+                  className="gw-btn-ghost sm"
+                  href={createOut.body.data.qr_image_url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  Open QR PNG ↗
+                </a>
+              )}
+            </div>
+          )}
           <Code>{pretty(createOut.body)}</Code>
         </div>
       )}
