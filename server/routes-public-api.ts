@@ -2,7 +2,7 @@ import express, { Response } from 'express';
 import pool from './db';
 import { gwApiToken, GwApiRequest } from './auth-mw';
 import crypto from 'crypto';
-import { buildUniqueTxnRef, buildUpiPayload, verifyPaytmPayment } from './paytm';
+import { buildUniqueTxnRef, buildUpiPayload, verifyPaytmPayment, classifyVerificationForPoll } from './paytm';
 import { sendOrderCallback } from './callback';
 import { apiError, apiSuccess, methodNotAllowed } from './api-response';
 
@@ -140,34 +140,42 @@ async function checkOrder(req: GwApiRequest, res: Response) {
     let order = r.rows[0];
     if (!order) return apiError(res, 404, 'Order not found', 'ORDER_NOT_FOUND');
 
-    if (order.status === 'pending' && order.expires_at && new Date(order.expires_at).getTime() < Date.now()) {
-      // mark expired but still try verification first
-    }
-
+    // Status engine (same rules as the hosted page):
+    //   - paid    : Paytm confirms TXN_SUCCESS with matching MID/order/amount
+    //   - failed  : amount_mismatch only (real terminal failure)
+    //   - expired : past expires_at and still not paid
+    //   - pending : everything else (no record yet, gateway hiccup, transient)
     if (order.status === 'pending') {
       const cfg = await getCreds(user.id);
       if (cfg?.paytm_merchant_id && cfg?.paytm_merchant_key) {
-        const verify = await verifyPaytmPayment(
-          { merchant_id: cfg.paytm_merchant_id, merchant_key: cfg.paytm_merchant_key, env: cfg.paytm_env },
-          order.txn_ref,
-          parseFloat(order.amount),
-        );
-        if (verify.paid) {
-          await pool.query(
-            `UPDATE gw_orders SET status='paid', verified_at=NOW(), gateway_txn_id=$1, gateway_bank_txn_id=$2, raw_gateway_response=$3, updated_at=NOW() WHERE id=$4`,
-            [verify.txn_id || null, verify.bank_txn_id || null, JSON.stringify(verify.raw || {}).slice(0, 4000), order.id],
+        try {
+          const verify = await verifyPaytmPayment(
+            { merchant_id: cfg.paytm_merchant_id, merchant_key: cfg.paytm_merchant_key, env: cfg.paytm_env },
+            order.txn_ref,
+            parseFloat(order.amount),
           );
-          sendOrderCallback(order.id).catch(() => {});
-          const r2 = await pool.query('SELECT * FROM gw_orders WHERE id=$1', [order.id]);
-          order = r2.rows[0];
-        } else if (verify.failure_type === 'payment_failed' || verify.failure_type === 'amount_mismatch') {
-          await pool.query(`UPDATE gw_orders SET status='failed', updated_at=NOW(), raw_gateway_response=$1 WHERE id=$2`,
-            [JSON.stringify(verify.raw || {}).slice(0, 4000), order.id]);
-          order.status = 'failed';
-        } else if (order.expires_at && new Date(order.expires_at).getTime() < Date.now()) {
-          await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1`, [order.id]);
-          order.status = 'expired';
+          const decision = classifyVerificationForPoll(verify);
+          if (decision === 'paid') {
+            await pool.query(
+              `UPDATE gw_orders SET status='paid', verified_at=NOW(), gateway_txn_id=$1, gateway_bank_txn_id=$2, raw_gateway_response=$3, updated_at=NOW() WHERE id=$4`,
+              [verify.txn_id || null, verify.bank_txn_id || null, JSON.stringify(verify.raw || {}).slice(0, 4000), order.id],
+            );
+            sendOrderCallback(order.id).catch(() => {});
+            const r2 = await pool.query('SELECT * FROM gw_orders WHERE id=$1', [order.id]);
+            order = r2.rows[0];
+          } else if (decision === 'failed') {
+            await pool.query(`UPDATE gw_orders SET status='failed', updated_at=NOW(), raw_gateway_response=$1 WHERE id=$2`,
+              [JSON.stringify(verify.raw || {}).slice(0, 4000), order.id]);
+            order.status = 'failed';
+          }
+        } catch {
+          // network/gateway hiccup — never terminalize, just keep waiting
         }
+      }
+      // Expiry takes over when nothing else has finalized the order
+      if (order.status === 'pending' && order.expires_at && new Date(order.expires_at).getTime() < Date.now()) {
+        await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1`, [order.id]);
+        order.status = 'expired';
       }
     }
 

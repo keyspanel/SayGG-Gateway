@@ -162,3 +162,27 @@ export function mapFailureToOrderStatus(failure_type?: string): 'pending' | 'fai
   if (failure_type === 'payment_failed' || failure_type === 'amount_mismatch') return 'failed';
   return 'pending';
 }
+
+/**
+ * Conservative classifier used by hosted-page polling and check-order.
+ *
+ * Razorpay-style rule: never flip an active pending order to "failed" just
+ * because verification can't yet see the payment. Only two outcomes from a
+ * poll are allowed:
+ *   - 'paid'    : Paytm has confirmed the txn AND amount matches
+ *   - 'pending' : everything else — no record, gateway pending, network
+ *                 error, transient TXN_FAILURE (user might retry), etc.
+ *
+ * The only true terminal "failed" we accept from a poll is an
+ * `amount_mismatch` AFTER a successful TXN_SUCCESS — i.e. money landed but
+ * for the wrong amount. That can never recover, so it's safe to terminalize.
+ *
+ * Anything else stays `pending` until expiry takes over (-> 'expired').
+ */
+export function classifyVerificationForPoll(
+  verify: PaytmVerifyResult,
+): 'paid' | 'pending' | 'failed' {
+  if (verify.paid) return 'paid';
+  if (verify.failure_type === 'amount_mismatch') return 'failed';
+  return 'pending';
+}

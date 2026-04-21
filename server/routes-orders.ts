@@ -1,7 +1,7 @@
 import express, { Response } from 'express';
 import pool from './db';
 import { gwSession, GwSessionRequest } from './auth-mw';
-import { verifyPaytmPayment } from './paytm';
+import { verifyPaytmPayment, classifyVerificationForPoll } from './paytm';
 import { sendOrderCallback } from './callback';
 import { apiError, apiSuccess, methodNotAllowed } from './api-response';
 
@@ -86,7 +86,8 @@ router.post('/orders/:id/refresh', gwSession, async (req: GwSessionRequest, res:
     parseFloat(order.amount),
   );
 
-  if (verify.paid) {
+  const decision = classifyVerificationForPoll(verify);
+  if (decision === 'paid') {
     await pool.query(
       `UPDATE gw_orders SET status='paid', verified_at=NOW(), gateway_txn_id=$1, gateway_bank_txn_id=$2, raw_gateway_response=$3, updated_at=NOW() WHERE id=$4`,
       [verify.txn_id || null, verify.bank_txn_id || null, JSON.stringify(verify.raw || {}).slice(0, 4000), orderId],
@@ -94,12 +95,19 @@ router.post('/orders/:id/refresh', gwSession, async (req: GwSessionRequest, res:
     sendOrderCallback(orderId).catch(() => {});
     return apiSuccess(res, 'Order refreshed', { status: 'paid', refreshed: true });
   }
-  if (verify.failure_type === 'payment_failed' || verify.failure_type === 'amount_mismatch') {
+  if (decision === 'failed') {
+    // Only true terminal failure (amount mismatch). Pending verification or
+    // transient gateway issues never terminalize an active order.
     await pool.query(`UPDATE gw_orders SET status='failed', updated_at=NOW(), raw_gateway_response=$1 WHERE id=$2`,
       [JSON.stringify(verify.raw || {}).slice(0, 4000), orderId]);
     return apiSuccess(res, 'Order refreshed', { status: 'failed', refreshed: true });
   }
-  return apiSuccess(res, 'Order refresh checked', { status: order.status, refreshed: false, detail: verify.detail });
+  // Past expiry with no payment → expired. Otherwise stay pending.
+  if (order.expires_at && new Date(order.expires_at).getTime() < Date.now()) {
+    await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1`, [orderId]);
+    return apiSuccess(res, 'Order refreshed', { status: 'expired', refreshed: true });
+  }
+  return apiSuccess(res, 'Order still pending', { status: 'pending', refreshed: false, detail: verify.detail });
 });
 
 router.all('/transactions', methodNotAllowed(['GET']));

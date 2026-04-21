@@ -19,8 +19,17 @@ interface PayOrder {
   bank_rrn: string | null;
 }
 
-const POLL_MS = 4000;
-const MAX_POLL_MIN = 15;
+// Polling cadence — Razorpay-style: gentle, no spam, no false transitions.
+//   0–60 s    : every 5 s   (catch fast UPI confirmations)
+//   1–5 min   : every 8 s
+//   5–15 min  : every 15 s
+//   15+ min   : every 30 s  (still polls until the order truly finalizes)
+function pollIntervalFor(elapsedMs: number): number {
+  if (elapsedMs < 60_000) return 5000;
+  if (elapsedMs < 5 * 60_000) return 8000;
+  if (elapsedMs < 15 * 60_000) return 15000;
+  return 30000;
+}
 
 async function fetchOrder(token: string, refresh = false): Promise<{ ok: boolean; status: number; data?: PayOrder; message?: string }> {
   try {
@@ -66,8 +75,9 @@ function StatusVisual({ order }: { order: PayOrder }) {
         <div className="pp-status-icon">
           <svg viewBox="0 0 52 52" width="56" height="56"><circle cx="26" cy="26" r="24" fill="none" stroke="currentColor" strokeWidth="3"/><line x1="18" y1="18" x2="34" y2="34" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round"/><line x1="34" y1="18" x2="18" y2="34" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round"/></svg>
         </div>
-        <h3>Payment not confirmed</h3>
-        <p>We couldn't verify your payment. If money was debited, it will be auto-refunded by your bank.</p>
+        <h3>This payment couldn't be completed</h3>
+        <p>The bank or UPI app reported that the transaction did not go through. If any amount was debited, it will be auto-reversed by your bank within a few business days.</p>
+        <p className="pp-meta">Please request a new payment link from the merchant to try again.</p>
       </div>
     );
   }
@@ -132,16 +142,25 @@ export default function PayPage() {
     setChecking(false);
   }, [token]);
 
+  // Adaptive polling: only while pending, paused on hidden tabs, gentle
+  // backoff. Polling continues until the order genuinely finalizes (paid,
+  // failed, expired, cancelled) — no time cap, no false transitions.
   useEffect(() => {
     if (!order || order.is_terminal) return;
     if (order.status !== 'pending') return;
-    const elapsed = Date.now() - startedAtRef.current;
-    if (elapsed > MAX_POLL_MIN * 60 * 1000) return;
-    const id = setInterval(() => {
-      if (document.hidden) return; // pause when tab hidden
-      pollOnce();
-    }, POLL_MS);
-    return () => clearInterval(id);
+    let cancelled = false;
+    let timer: number | undefined;
+    const tick = async () => {
+      if (cancelled) return;
+      if (!document.hidden) {
+        await pollOnce();
+      }
+      if (cancelled) return;
+      const elapsed = Date.now() - startedAtRef.current;
+      timer = window.setTimeout(tick, pollIntervalFor(elapsed));
+    };
+    timer = window.setTimeout(tick, pollIntervalFor(Date.now() - startedAtRef.current));
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, [order, pollOnce]);
 
   if (loading) {
@@ -238,7 +257,9 @@ export default function PayPage() {
           </div>
           <div className="pp-poll-row">
             <span className={`pp-dot${checking ? ' on' : ''}`} />
-            {checking ? 'Checking payment…' : 'Waiting for payment confirmation'}
+            {checking
+              ? 'Checking with the bank…'
+              : 'Waiting for payment confirmation — this page updates automatically'}
             <button className="pp-link" onClick={pollOnce} disabled={checking}>Refresh status</button>
           </div>
         </div>

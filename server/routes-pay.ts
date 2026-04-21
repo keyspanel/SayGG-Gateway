@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import QRCode from 'qrcode';
 import pool from './db';
-import { verifyPaytmPayment } from './paytm';
+import { verifyPaytmPayment, classifyVerificationForPoll } from './paytm';
 import { sendOrderCallback } from './callback';
 import { apiError, apiSuccess, methodNotAllowed } from './api-response';
 
@@ -60,7 +60,15 @@ function isExpired(o: OrderRow): boolean {
 
 async function maybeRefreshFromGateway(o: OrderRow, cfg: MerchantCfg): Promise<OrderRow> {
   if (o.status !== 'pending') return o;
-  if (!cfg.paytm_merchant_id || !cfg.paytm_merchant_key) return o;
+  if (!cfg.paytm_merchant_id || !cfg.paytm_merchant_key) {
+    // No creds to verify with — only expiry can finalize the order.
+    if (isExpired(o)) {
+      await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1`, [o.id]);
+      const r2 = await pool.query<OrderRow>(`SELECT * FROM gw_orders WHERE id=$1`, [o.id]);
+      return r2.rows[0] || o;
+    }
+    return o;
+  }
 
   try {
     const verify = await verifyPaytmPayment(
@@ -68,13 +76,18 @@ async function maybeRefreshFromGateway(o: OrderRow, cfg: MerchantCfg): Promise<O
       o.txn_ref,
       parseFloat(o.amount),
     );
-    if (verify.paid) {
+    const decision = classifyVerificationForPoll(verify);
+
+    if (decision === 'paid') {
       await pool.query(
         `UPDATE gw_orders SET status='paid', verified_at=NOW(), gateway_txn_id=$1, gateway_bank_txn_id=$2, raw_gateway_response=$3, updated_at=NOW() WHERE id=$4`,
         [verify.txn_id || null, verify.bank_txn_id || null, JSON.stringify(verify.raw || {}).slice(0, 4000), o.id],
       );
       sendOrderCallback(o.id).catch(() => {});
-    } else if (verify.failure_type === 'payment_failed' || verify.failure_type === 'amount_mismatch') {
+    } else if (decision === 'failed') {
+      // Only true terminal failure (e.g. amount mismatch with a confirmed
+      // TXN_SUCCESS for the wrong amount). Pending verification, network
+      // errors, no_record, etc. are NEVER terminalized here.
       await pool.query(
         `UPDATE gw_orders SET status='failed', updated_at=NOW(), raw_gateway_response=$1 WHERE id=$2`,
         [JSON.stringify(verify.raw || {}).slice(0, 4000), o.id],
@@ -82,9 +95,16 @@ async function maybeRefreshFromGateway(o: OrderRow, cfg: MerchantCfg): Promise<O
     } else if (isExpired(o)) {
       await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1`, [o.id]);
     }
+    // Otherwise: stay pending. The user may still pay; we'll check again next poll.
     const r2 = await pool.query<OrderRow>(`SELECT * FROM gw_orders WHERE id=$1`, [o.id]);
     return r2.rows[0] || o;
   } catch {
+    // Network/gateway hiccup — stay pending, never failed.
+    if (isExpired(o)) {
+      await pool.query(`UPDATE gw_orders SET status='expired', updated_at=NOW() WHERE id=$1`, [o.id]);
+      const r2 = await pool.query<OrderRow>(`SELECT * FROM gw_orders WHERE id=$1`, [o.id]);
+      return r2.rows[0] || o;
+    }
     return o;
   }
 }
