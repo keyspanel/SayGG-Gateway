@@ -1,21 +1,46 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useGwAuth } from './AuthCtx';
 
-const NAV = [
-  { to: '/gateway', label: 'Dashboard', end: true, icon: <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path> },
-  { to: '/gateway/settings', label: 'UPI Settings', icon: <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path> },
-  { to: '/gateway/transactions', label: 'Transactions', icon: <path d="M17 3v18 M3 15h18 M3 9h18"></path> },
-  { to: '/gateway/docs', label: 'API Docs', icon: <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8"></path> },
+const NAV: { to: string; label: string; end?: boolean; icon: React.ReactNode }[] = [
+  {
+    to: '/gateway', label: 'Dashboard', end: true,
+    icon: <><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></>,
+  },
+  {
+    to: '/gateway/settings', label: 'UPI Settings',
+    icon: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></>,
+  },
+  {
+    to: '/gateway/transactions', label: 'Transactions',
+    icon: <><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></>,
+  },
+  {
+    to: '/gateway/docs', label: 'API Docs',
+    icon: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></>,
+  },
 ];
 
 export default function GwLayout() {
   const { user, logout } = useGwAuth();
   const loc = useLocation();
   const [open, setOpen] = useState(false);
+
+  // Lock body scroll when drawer is open on mobile.
+  useEffect(() => {
+    if (open) document.body.style.overflow = 'hidden';
+    else document.body.style.overflow = '';
+    return () => { document.body.style.overflow = ''; };
+  }, [open]);
+
+  // Close drawer on route change.
+  useEffect(() => { setOpen(false); }, [loc.pathname]);
+
+  const current = NAV.find((n) => (n.end ? loc.pathname === n.to : loc.pathname.startsWith(n.to)));
+
   return (
     <div className="gw-shell">
-      <aside className={`gw-side${open ? ' open' : ''}`}>
+      <aside className={`gw-side${open ? ' open' : ''}`} aria-hidden={!open && undefined}>
         <div className="gw-side-header">
           <div className="gw-brand-mark">PG</div>
           <div className="gw-brand-text">
@@ -25,12 +50,15 @@ export default function GwLayout() {
         </div>
         <nav className="gw-nav">
           {NAV.map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => `gw-nav-item${isActive ? ' active' : ''}`} onClick={() => setOpen(false)}>
+            <NavLink
+              key={n.to}
+              to={n.to}
+              end={n.end}
+              className={({ isActive }) => `gw-nav-item${isActive ? ' active' : ''}`}
+              onClick={() => setOpen(false)}
+            >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 {n.icon}
-                {n.to === '/gateway/transactions' && <path d="M12 3v18" strokeWidth="2"/>}
-                {n.to === '/gateway/transactions' && <path d="M3 15h18" strokeWidth="2"/>}
-                {n.to === '/gateway/transactions' && <path d="M3 9h18" strokeWidth="2"/>}
               </svg>
               {n.label}
             </NavLink>
@@ -44,29 +72,32 @@ export default function GwLayout() {
               <div className="gw-user-mail">{user?.email}</div>
             </div>
           </div>
-          <button className="gw-btn-ghost" style={{width: '100%'}} onClick={logout}>
+          <button className="gw-btn-ghost gw-btn-block" onClick={logout}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-              <polyline points="16 17 21 12 16 7"></polyline>
-              <line x1="21" y1="12" x2="9" y2="12"></line>
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+              <polyline points="16 17 21 12 16 7"/>
+              <line x1="21" y1="12" x2="9" y2="12"/>
             </svg>
             Logout
           </button>
         </div>
       </aside>
+
       <div className="gw-main">
         <header className="gw-top">
-          <button className="gw-burger" aria-label="Menu" onClick={() => setOpen(true)}>
+          <button className="gw-burger" aria-label="Open menu" onClick={() => setOpen(true)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="3" y1="12" x2="21" y2="12"></line>
-              <line x1="3" y1="6" x2="21" y2="6"></line>
-              <line x1="3" y1="18" x2="21" y2="18"></line>
+              <line x1="3" y1="6" x2="21" y2="6"/>
+              <line x1="3" y1="12" x2="21" y2="12"/>
+              <line x1="3" y1="18" x2="21" y2="18"/>
             </svg>
           </button>
-          <div className="gw-top-title">{NAV.find((n) => (n.end ? loc.pathname === n.to : loc.pathname.startsWith(n.to)))?.label || 'Gateway'}</div>
+          <div className="gw-top-mark">PG</div>
+          <div className="gw-top-title">{current?.label || 'Gateway'}</div>
         </header>
         <main className="gw-content"><Outlet /></main>
       </div>
+
       <div className={`gw-backdrop${open ? ' open' : ''}`} onClick={() => setOpen(false)} />
     </div>
   );

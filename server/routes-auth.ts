@@ -10,8 +10,28 @@ const router = express.Router();
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,32}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Unambiguous base58-style alphabet (no 0, O, I, l, 1)
+const TOKEN_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+const TOKEN_BODY_LEN = 16; // 16 chars * log2(57) ≈ 93 bits entropy
+const TOKEN_PREFIX = 'pg_';
+
 function genToken(): string {
-  return 'gw_' + crypto.randomBytes(32).toString('hex');
+  const bytes = crypto.randomBytes(TOKEN_BODY_LEN);
+  let out = '';
+  for (let i = 0; i < TOKEN_BODY_LEN; i++) {
+    out += TOKEN_ALPHABET[bytes[i] % TOKEN_ALPHABET.length];
+  }
+  return TOKEN_PREFIX + out;
+}
+
+async function genUniqueToken(): Promise<string> {
+  for (let i = 0; i < 5; i++) {
+    const t = genToken();
+    const r = await pool.query('SELECT 1 FROM gw_users WHERE api_token=$1 LIMIT 1', [t]);
+    if (!r.rows[0]) return t;
+  }
+  // Fallback: extra entropy if the unlikely happens
+  return TOKEN_PREFIX + crypto.randomBytes(12).toString('hex').slice(0, TOKEN_BODY_LEN);
 }
 
 router.post('/register', async (req, res) => {
@@ -37,12 +57,12 @@ router.post('/register', async (req, res) => {
     }
 
     const hash = await bcrypt.hash(password, 10);
-    const apiToken = genToken();
+    // No API token at registration. User must save settings, then generate.
     const ins = await pool.query(
       `INSERT INTO gw_users (username, email, password_hash, api_token, api_token_created_at)
-       VALUES ($1,$2,$3,$4,NOW())
+       VALUES ($1,$2,$3,NULL,NULL)
        RETURNING id, username`,
-      [username, email, hash, apiToken],
+      [username, email, hash],
     );
     const user = ins.rows[0];
     await pool.query('INSERT INTO gw_settings (user_id, is_active) VALUES ($1, FALSE) ON CONFLICT (user_id) DO NOTHING', [user.id]);
@@ -89,14 +109,30 @@ router.get('/me', gwSession, async (req: GwSessionRequest, res: Response) => {
   apiSuccess(res, 'Session loaded', { id: u.id, username: u.username, email: u.email, has_token: !!u.api_token });
 });
 
-router.post('/regenerate-token', gwSession, async (req: GwSessionRequest, res: Response) => {
-  const newToken = genToken();
+async function generateOrRegenerate(req: GwSessionRequest, res: Response) {
+  const userId = req.gwUser!.id;
+  const s = await pool.query(
+    'SELECT paytm_upi_id, paytm_merchant_id, paytm_merchant_key, is_active FROM gw_settings WHERE user_id=$1',
+    [userId],
+  );
+  const cfg = s.rows[0];
+  const missing: string[] = [];
+  if (!cfg?.paytm_upi_id) missing.push('paytm_upi_id');
+  if (!cfg?.paytm_merchant_id) missing.push('paytm_merchant_id');
+  if (!cfg?.paytm_merchant_key) missing.push('paytm_merchant_key');
+  if (missing.length || !cfg?.is_active) {
+    return apiError(res, 412, 'Save your gateway settings before generating an API token.', 'SETTINGS_MISSING', { missing });
+  }
+  const newToken = await genUniqueToken();
   await pool.query(
     'UPDATE gw_users SET api_token=$1, api_token_created_at=NOW(), updated_at=NOW() WHERE id=$2',
-    [newToken, req.gwUser!.id],
+    [newToken, userId],
   );
-  apiSuccess(res, 'API token regenerated', { api_token: newToken });
-});
+  apiSuccess(res, 'API token ready', { api_token: newToken, api_token_created_at: new Date().toISOString() });
+}
+
+router.post('/regenerate-token', gwSession, generateOrRegenerate);
+router.post('/generate-token', gwSession, generateOrRegenerate);
 
 router.get('/token', gwSession, async (req: GwSessionRequest, res: Response) => {
   const r = await pool.query('SELECT api_token, api_token_created_at FROM gw_users WHERE id=$1', [req.gwUser!.id]);
@@ -107,6 +143,7 @@ router.all('/register', methodNotAllowed(['POST']));
 router.all('/login', methodNotAllowed(['POST']));
 router.all('/me', methodNotAllowed(['GET']));
 router.all('/regenerate-token', methodNotAllowed(['POST']));
+router.all('/generate-token', methodNotAllowed(['POST']));
 router.all('/token', methodNotAllowed(['GET']));
 
 export default router;

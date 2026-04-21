@@ -1,18 +1,20 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { gwGet, gwPost } from './api';
+import { useGwAuth } from './AuthCtx';
 
-function Copy({ text }: { text: string }) {
+function Copy({ text, label = 'Copy' }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
   return (
     <button className="gw-copy" onClick={async () => {
       try { await navigator.clipboard.writeText(text); setDone(true); setTimeout(() => setDone(false), 1500); } catch {}
     }}>
       {done ? (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
       ) : (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
       )}
-      {done ? 'Copied' : 'Copy'}
+      {done ? 'Copied' : label}
     </button>
   );
 }
@@ -27,34 +29,64 @@ function Code({ children }: { children: string }) {
 }
 
 export default function GwDocs() {
+  const { refresh } = useGwAuth();
   const [token, setToken] = useState('');
   const [created, setCreated] = useState<string | null>(null);
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmRegen, setConfirmRegen] = useState(false);
+  const [settingsActive, setSettingsActive] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [tokenMsg, setTokenMsg] = useState<{ ok?: string; err?: string }>({});
+  const [tokenCopied, setTokenCopied] = useState(false);
 
-  const load = async () => {
-    const d = await gwGet('/auth/token');
-    setToken(d.api_token || '');
-    setCreated(d.api_token_created_at || null);
-  };
-  useEffect(() => { load().catch(() => {}); }, []);
-
-  const regen = async () => {
-    setBusy(true);
+  const loadAll = async () => {
     try {
-      const r = await gwPost('/auth/regenerate-token');
+      const [t, s] = await Promise.all([
+        gwGet('/auth/token').catch(() => ({})),
+        gwGet('/settings/').catch(() => ({})),
+      ]);
+      setToken(t?.api_token || '');
+      setCreated(t?.api_token_created_at || null);
+      setSettingsActive(!!s?.is_active);
+    } finally {
+      setSettingsLoaded(true);
+    }
+  };
+  useEffect(() => { loadAll(); }, []);
+
+  const generate = async () => {
+    setBusy(true); setTokenMsg({});
+    try {
+      const r = await gwPost('/auth/generate-token');
       setToken(r.api_token);
-      setCreated(new Date().toISOString());
+      setCreated(r.api_token_created_at || new Date().toISOString());
       setConfirmRegen(false);
-    } finally { setBusy(false); }
+      setShow(true);
+      setTokenMsg({ ok: 'API token generated. Keep it safe — it will not be shown in full again automatically.' });
+      refresh().catch(() => {});
+    } catch (e: any) {
+      setTokenMsg({ err: e?.message || 'Failed to generate token' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copyToken = async () => {
+    if (!token) return;
+    try {
+      await navigator.clipboard.writeText(token);
+      setTokenCopied(true);
+      setTimeout(() => setTokenCopied(false), 1500);
+    } catch {}
   };
 
   const baseUrl = (typeof window !== 'undefined' ? window.location.origin : '') + '/api/gateway';
-  const masked = token ? token.slice(0, 6) + '••••••••••••••••' + token.slice(-4) : '';
+  const tokenForCode = token || 'YOUR_API_TOKEN';
+  const masked = token ? token.slice(0, 5) + '••••••••' + token.slice(-4) : '';
 
   const createCurl = `curl -X POST '${baseUrl}/create-order' \\
-  -H 'Authorization: Bearer ${token || 'YOUR_API_TOKEN'}' \\
+  -H 'Authorization: Bearer ${tokenForCode}' \\
   -H 'Content-Type: application/json' \\
   -d '{
     "amount": 199.00,
@@ -66,14 +98,14 @@ export default function GwDocs() {
   }'`;
 
   const checkCurl = `curl -X POST '${baseUrl}/check-order' \\
-  -H 'Authorization: Bearer ${token || 'YOUR_API_TOKEN'}' \\
+  -H 'Authorization: Bearer ${tokenForCode}' \\
   -H 'Content-Type: application/json' \\
   -d '{ "order_id": 123 }'`;
 
   const jsCode = `const res = await fetch('${baseUrl}/create-order', {
   method: 'POST',
   headers: {
-    'Authorization': 'Bearer ${token || 'YOUR_API_TOKEN'}',
+    'Authorization': 'Bearer ${tokenForCode}',
     'Content-Type': 'application/json',
   },
   body: JSON.stringify({ amount: 199, currency: 'INR', client_order_id: 'ORD-1001' }),
@@ -85,7 +117,7 @@ console.log(data.data.payment_link);`;
 
 r = requests.post(
     '${baseUrl}/create-order',
-    headers={'Authorization': 'Bearer ${token || 'YOUR_API_TOKEN'}'},
+    headers={'Authorization': 'Bearer ${tokenForCode}'},
     json={'amount': 199, 'currency': 'INR', 'client_order_id': 'ORD-1001'},
     timeout=20,
 )
@@ -96,7 +128,7 @@ $ch = curl_init('${baseUrl}/create-order');
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_POST, true);
 curl_setopt($ch, CURLOPT_HTTPHEADER, [
-  'Authorization: Bearer ${token || 'YOUR_API_TOKEN'}',
+  'Authorization: Bearer ${tokenForCode}',
   'Content-Type: application/json',
 ]);
 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
@@ -192,85 +224,152 @@ echo curl_exec($ch);`;
 
   return (
     <div className="gw-page">
+      {/* Quick start */}
       <div className="gw-card">
         <div className="gw-card-h">
           <h3>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
             Quick start
           </h3>
         </div>
         <ol className="gw-steps">
-          <li>Save your Paytm UPI settings on the UPI Settings page.</li>
-          <li>Copy your API token from below.</li>
-          <li>Call the Create Order API to start a payment.</li>
+          <li>Save your Paytm UPI settings on the <Link to="/gateway/settings">UPI Settings</Link> page.</li>
+          <li>Generate your API token in the panel below.</li>
+          <li>Call <code>POST /create-order</code> to start a payment.</li>
           <li>Show the returned <code>payment_link</code> (UPI string) or QR to your customer.</li>
-          <li>Poll Check Order API or wait for the callback to confirm payment.</li>
+          <li>Poll <code>POST /check-order</code> or wait for the callback to confirm payment.</li>
         </ol>
       </div>
 
-      <div className="gw-card" style={{border: '1px solid var(--gw-primary)'}}>
+      {/* Token panel */}
+      <div className="gw-card feature">
         <div className="gw-card-h">
           <h3>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
             Your API token
           </h3>
+          {token && <span className="gw-badge ok">Active</span>}
         </div>
-        <div className="gw-token-row">
-          <code className="gw-token">{token ? (show ? token : masked) : 'No token yet'}</code>
-          <button className="gw-btn-ghost sm" onClick={() => setShow(!show)}>{show ? 'Hide' : 'Show'}</button>
-          {token && <button className="gw-btn-primary sm" onClick={async () => {
-            try { await navigator.clipboard.writeText(token); } catch {}
-          }}>Copy</button>}
-          <button className="gw-btn-danger sm" disabled={busy} onClick={() => setConfirmRegen(true)}>{busy ? 'Working…' : 'Regenerate'}</button>
-        </div>
-        {confirmRegen && (
-          <div className="gw-alert error" style={{alignItems: 'flex-start'}}>
-            <div>
-              <strong>Regenerate API token?</strong>
-              <div style={{marginTop: '4px'}}>Your old token will stop working immediately.</div>
-              <div className="gw-actions" style={{marginTop: '12px'}}>
-                <button className="gw-btn-danger sm" disabled={busy} onClick={regen}>{busy ? 'Working…' : 'Yes, regenerate'}</button>
-                <button className="gw-btn-ghost sm" disabled={busy} onClick={() => setConfirmRegen(false)}>Cancel</button>
-              </div>
+
+        {!settingsLoaded ? (
+          <div className="gw-loading">Loading…</div>
+        ) : !settingsActive && !token ? (
+          <>
+            <div className="gw-alert warn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              <span>Save valid Paytm UPI settings first — once your gateway is active you can generate an API token.</span>
             </div>
+            <div className="gw-token-empty">
+              <h4>No token yet</h4>
+              <p>Tokens stay locked until your gateway is configured.</p>
+              <Link to="/gateway/settings" className="gw-btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><polyline points="12 5 19 12 12 19"/></svg>
+                Go to UPI Settings
+              </Link>
+            </div>
+          </>
+        ) : !token ? (
+          <>
+            {tokenMsg.err && <div className="gw-alert error"><span>{tokenMsg.err}</span></div>}
+            <div className="gw-token-empty">
+              <h4>Generate your API token</h4>
+              <p>This will create a unique token used to authenticate all public API requests.</p>
+              <button className="gw-btn-primary" disabled={busy} onClick={generate}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="13 2 13 10 21 10"/><path d="M21 10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8z"/></svg>
+                {busy ? 'Generating…' : 'Generate API token'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="gw-token-card">
+            {tokenMsg.ok && <div className="gw-alert ok"><span>{tokenMsg.ok}</span></div>}
+            {tokenMsg.err && <div className="gw-alert error"><span>{tokenMsg.err}</span></div>}
+
+            <div className="gw-token-display">{show ? token : masked}</div>
+            <div className="gw-token-actions">
+              <button className="gw-btn-ghost sm" onClick={() => setShow(!show)}>
+                {show ? 'Hide' : 'Show'}
+              </button>
+              <button className="gw-btn-primary sm" onClick={copyToken}>
+                {tokenCopied ? 'Copied ✓' : 'Copy token'}
+              </button>
+              <button className="gw-btn-danger sm" disabled={busy} onClick={() => setConfirmRegen(true)}>
+                Regenerate
+              </button>
+            </div>
+
+            {confirmRegen && (
+              <div className="gw-alert warn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <div style={{ flex: 1 }}>
+                  <strong>Regenerate API token?</strong>
+                  <div style={{ marginTop: 4, color: 'var(--gw-text-mute)', fontWeight: 400 }}>Your current token will stop working immediately. Update any integrations using it.</div>
+                  <div className="gw-actions" style={{ marginTop: 10 }}>
+                    <button className="gw-btn-danger sm" disabled={busy} onClick={generate}>{busy ? 'Working…' : 'Yes, regenerate'}</button>
+                    <button className="gw-btn-ghost sm" disabled={busy} onClick={() => setConfirmRegen(false)}>Cancel</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {created && <p className="gw-muted" style={{ fontSize: 12 }}>Created: {new Date(created).toLocaleString()}</p>}
+
+            <p className="gw-muted">
+              Send the token as <code>Authorization: Bearer YOUR_TOKEN</code> header (recommended).
+              <br />Header <code>X-Api-Token</code>, query <code>?api_token=</code>, and JSON body field <code>api_token</code> are also supported.
+            </p>
           </div>
         )}
-        {created && <p className="gw-muted" style={{fontSize: '12px', marginTop: '-4px', marginBottom: '16px'}}>Created: {new Date(created).toLocaleString()}</p>}
-        <p className="gw-muted">Authentication: send the token as <code>Authorization: Bearer YOUR_TOKEN</code> header. Header is the recommended method. The header <code>X-Api-Token</code>, query param <code>?api_token=</code> and JSON body field <code>api_token</code> are also supported.</p>
-        <div className="gw-base-row"><b>Base URL</b><code>{baseUrl}</code><Copy text={baseUrl} /></div>
+
+        <div className="gw-base-row">
+          <b>Base URL</b>
+          <code>{baseUrl}</code>
+          <Copy text={baseUrl} />
+        </div>
       </div>
 
+      {/* Create Order */}
       <div className="gw-card">
-        <div className="gw-card-h"><h3>1. Create Order</h3><span className="gw-method post">POST</span></div>
+        <div className="gw-card-h">
+          <h3>1. Create Order</h3>
+          <span className="gw-method">POST</span>
+        </div>
         <div className="gw-base-row"><code>{baseUrl}/create-order</code><Copy text={`${baseUrl}/create-order`} /></div>
-        <h4 style={{marginTop: '24px', marginBottom: '8px'}}>Parameters</h4>
-        <div style={{overflowX: 'auto'}}>
+
+        <div className="gw-h4">Parameters</div>
+        <div className="gw-params-wrap">
           <table className="gw-params">
             <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
             <tbody>
               <tr><td>amount</td><td>number</td><td>yes</td><td>Order amount in INR (e.g. 199.00)</td></tr>
               <tr><td>currency</td><td>string</td><td>no</td><td>Currency code, default INR</td></tr>
-              <tr><td>client_order_id</td><td>string</td><td>no</td><td>Your own unique order id (deduped per user)</td></tr>
+              <tr><td>client_order_id</td><td>string</td><td>no</td><td>Your unique order id (deduped per user)</td></tr>
               <tr><td>customer_reference</td><td>string</td><td>no</td><td>Your internal customer ref</td></tr>
               <tr><td>callback_url</td><td>string</td><td>no</td><td>HTTPS URL we POST to once payment is verified</td></tr>
               <tr><td>note</td><td>string</td><td>no</td><td>Short description shown in UPI app</td></tr>
             </tbody>
           </table>
         </div>
-        <h4 style={{marginTop: '24px'}}>Example — cURL</h4><Code>{createCurl}</Code>
-        <h4 style={{marginTop: '24px'}}>Example — JavaScript</h4><Code>{jsCode}</Code>
-        <h4 style={{marginTop: '24px'}}>Example — Python</h4><Code>{pyCode}</Code>
-        <h4 style={{marginTop: '24px'}}>Example — PHP</h4><Code>{phpCode}</Code>
-        <h4 style={{marginTop: '24px'}}>Success response</h4><Code>{createResp}</Code>
-        <h4 style={{marginTop: '24px'}}>Invalid token error</h4><Code>{errResp}</Code>
-        <h4 style={{marginTop: '24px'}}>Settings missing error</h4><Code>{settingsMissingResp}</Code>
+
+        <div className="gw-h4">Example — cURL</div><Code>{createCurl}</Code>
+        <div className="gw-h4">Example — JavaScript</div><Code>{jsCode}</Code>
+        <div className="gw-h4">Example — Python</div><Code>{pyCode}</Code>
+        <div className="gw-h4">Example — PHP</div><Code>{phpCode}</Code>
+        <div className="gw-h4">Success response</div><Code>{createResp}</Code>
+        <div className="gw-h4">Invalid token error</div><Code>{errResp}</Code>
+        <div className="gw-h4">Settings missing error</div><Code>{settingsMissingResp}</Code>
       </div>
 
+      {/* Check Order */}
       <div className="gw-card">
-        <div className="gw-card-h"><h3>2. Check Order</h3><span className="gw-method post">POST/GET</span></div>
+        <div className="gw-card-h">
+          <h3>2. Check Order</h3>
+          <span className="gw-method">POST / GET</span>
+        </div>
         <div className="gw-base-row"><code>{baseUrl}/check-order</code><Copy text={`${baseUrl}/check-order`} /></div>
-        <h4 style={{marginTop: '24px', marginBottom: '8px'}}>Parameters (any one)</h4>
-        <div style={{overflowX: 'auto'}}>
+
+        <div className="gw-h4">Parameters (any one)</div>
+        <div className="gw-params-wrap">
           <table className="gw-params">
             <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
             <tbody>
@@ -280,42 +379,51 @@ echo curl_exec($ch);`;
             </tbody>
           </table>
         </div>
-        <h4 style={{marginTop: '24px'}}>Example</h4><Code>{checkCurl}</Code>
-        <h4 style={{marginTop: '24px'}}>Pending response</h4><Code>{pendingResp}</Code>
-        <h4 style={{marginTop: '24px'}}>Paid response</h4><Code>{checkResp}</Code>
-        <h4 style={{marginTop: '24px'}}>Invalid endpoint response</h4><Code>{invalidEndpointResp}</Code>
+
+        <div className="gw-h4">Example</div><Code>{checkCurl}</Code>
+        <div className="gw-h4">Pending response</div><Code>{pendingResp}</Code>
+        <div className="gw-h4">Paid response</div><Code>{checkResp}</Code>
+        <div className="gw-h4">Invalid endpoint response</div><Code>{invalidEndpointResp}</Code>
       </div>
 
+      {/* Callback */}
       <div className="gw-card">
         <div className="gw-card-h">
           <h3>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
             Callback payload
           </h3>
         </div>
-        <p className="gw-muted" style={{lineHeight: 1.6, marginBottom: '16px'}}>When an order is verified as paid, we POST this JSON body to your <code>callback_url</code>. Reply with HTTP 2xx to acknowledge. If delivery fails, we automatically retry on every subsequent Check Order call until it succeeds.</p>
+        <p className="gw-muted">
+          When an order is verified as paid, we POST this JSON body to your <code>callback_url</code>.
+          Reply with HTTP 2xx to acknowledge. If delivery fails, we automatically retry on every subsequent Check Order call until it succeeds.
+        </p>
         <Code>{callbackPayload}</Code>
-        <h4 style={{marginTop: '24px', marginBottom: '8px'}}>Verifying the signature</h4>
-        <p className="gw-muted" style={{lineHeight: 1.6, marginBottom: '16px'}}>Each callback includes an <code>X-Gateway-Signature</code> header — an HMAC-SHA256 hex digest of the raw request body using <b>your API token as the secret</b>. Always verify it before trusting the payload.</p>
+
+        <div className="gw-h4">Verifying the signature</div>
+        <p className="gw-muted">
+          Each callback includes an <code>X-Gateway-Signature</code> header — an HMAC-SHA256 hex digest of the raw request body using <b>your API token as the secret</b>. Always verify it before trusting the payload.
+        </p>
         <Code>{`// Node.js example
 const crypto = require('crypto');
 const expected = crypto.createHmac('sha256', YOUR_API_TOKEN).update(rawBody).digest('hex');
 if (expected !== req.headers['x-gateway-signature']) throw new Error('bad signature');`}</Code>
       </div>
 
+      {/* Statuses */}
       <div className="gw-card">
         <div className="gw-card-h">
           <h3>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             Order statuses
           </h3>
         </div>
         <ul className="gw-list">
-          <li><span className="gw-badge warn" style={{width: '80px', justifyContent: 'center'}}>pending</span> <span className="gw-muted">order created, awaiting payment</span></li>
-          <li><span className="gw-badge ok" style={{width: '80px', justifyContent: 'center'}}>paid</span> <span className="gw-muted">payment received and verified with Paytm</span></li>
-          <li><span className="gw-badge bad" style={{width: '80px', justifyContent: 'center'}}>failed</span> <span className="gw-muted">payment failed or amount mismatch</span></li>
-          <li><span className="gw-badge bad" style={{width: '80px', justifyContent: 'center'}}>cancelled</span> <span className="gw-muted">cancelled by you</span></li>
-          <li><span className="gw-badge mute" style={{width: '80px', justifyContent: 'center'}}>expired</span> <span className="gw-muted">not paid before <code>expires_at</code></span></li>
+          <li><span className="gw-badge warn" style={{ minWidth: 78, justifyContent: 'center' }}>pending</span> <span className="gw-muted">order created, awaiting payment</span></li>
+          <li><span className="gw-badge ok" style={{ minWidth: 78, justifyContent: 'center' }}>paid</span> <span className="gw-muted">payment received and verified with Paytm</span></li>
+          <li><span className="gw-badge bad" style={{ minWidth: 78, justifyContent: 'center' }}>failed</span> <span className="gw-muted">payment failed or amount mismatch</span></li>
+          <li><span className="gw-badge bad" style={{ minWidth: 78, justifyContent: 'center' }}>cancelled</span> <span className="gw-muted">cancelled by you</span></li>
+          <li><span className="gw-badge mute" style={{ minWidth: 78, justifyContent: 'center' }}>expired</span> <span className="gw-muted">not paid before <code>expires_at</code></span></li>
         </ul>
       </div>
     </div>

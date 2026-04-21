@@ -9,16 +9,20 @@ import GwSettings from './Settings';
 import GwTransactions from './Transactions';
 import GwDocs from './Docs';
 
+function FullBoot() {
+  return <div className="gw-fullboot" aria-label="Loading" />;
+}
+
 function PrivateRoute({ children }: { children: React.ReactElement }) {
   const { user, loading } = useGwAuth();
-  if (loading) return <div className="gw-loading">Loading…</div>;
+  if (loading) return <FullBoot />;
   if (!user) return <Navigate to="/gateway/login" replace />;
   return children;
 }
 
 function PublicOnly({ children }: { children: React.ReactElement }) {
   const { user, loading } = useGwAuth();
-  if (loading) return <div className="gw-loading">Loading…</div>;
+  if (loading) return <FullBoot />;
   if (user) return <Navigate to="/gateway" replace />;
   return children;
 }
