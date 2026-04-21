@@ -53,6 +53,9 @@ CREATE TABLE IF NOT EXISTS gw_orders (
 CREATE INDEX IF NOT EXISTS idx_gw_orders_user ON gw_orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_gw_orders_status ON gw_orders(status);
 CREATE INDEX IF NOT EXISTS idx_gw_orders_client ON gw_orders(user_id, client_order_id);
+
+ALTER TABLE gw_orders ADD COLUMN IF NOT EXISTS public_token VARCHAR(48);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gw_orders_public_token ON gw_orders(public_token);
 `;
 
 export async function runGatewayMigrations(): Promise<void> {

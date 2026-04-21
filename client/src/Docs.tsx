@@ -148,6 +148,9 @@ echo curl_exec($ch);`;
     "status": "pending",
     "payment_link": "upi://pay?pa=merchant@paytm&pn=Brand&am=199.00&cu=INR&tr=...",
     "upi_payload": "upi://pay?pa=...",
+    "public_token": "9k3mZpQ2vR8sT1xY4nL6Aw",
+    "payment_page_url": "https://your-domain.com/pay/9k3mZpQ2vR8sT1xY4nL6Aw",
+    "qr_image_url": "/api/pay/9k3mZpQ2vR8sT1xY4nL6Aw/qr.png",
     "created_at": "2026-04-20T10:15:01.000Z",
     "expires_at": "2026-04-20T10:45:01.000Z",
     "callback_url": "https://your-site.com/payment/callback"
@@ -327,8 +330,80 @@ echo curl_exec($ch);`;
         </div>
       </div>
 
+      {/* Method overview */}
+      <div className="gw-card">
+        <div className="gw-card-h">
+          <h3>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3h7v7H3z"/><path d="M14 3h7v7h-7z"/><path d="M14 14h7v7h-7z"/><path d="M3 14h7v7H3z"/></svg>
+            Two ways to accept payments
+          </h3>
+        </div>
+        <div className="gw-method-grid">
+          <div className="gw-method-tile">
+            <div className="gw-method-tag">Method 1 · API only</div>
+            <h4>Server-to-server</h4>
+            <p>Call <code>create-order</code>, render the returned <code>upi_payload</code> as your own QR/button, then poll <code>check-order</code> or wait for the webhook callback.</p>
+          </div>
+          <div className="gw-method-tile">
+            <div className="gw-method-tag">Method 2 · Hosted page</div>
+            <h4>Online payment link</h4>
+            <p>Same <code>create-order</code> call now also returns a <code>payment_page_url</code>. Send that link to your customer — they get a polished checkout page with QR, status updates and confirmation, no UI work on your side.</p>
+          </div>
+        </div>
+      </div>
+
       {/* Test Console — only when token is ready */}
       {token && settingsActive && <TestConsole apiToken={token} baseUrl={baseUrl} />}
+
+      {/* Method 2 hosted page docs */}
+      <div className="gw-card">
+        <div className="gw-card-h">
+          <h3>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            Method 2 — Hosted Payment Page
+          </h3>
+          <span className="gw-badge ok">New</span>
+        </div>
+        <p className="gw-muted">
+          Every order created via <code>POST /create-order</code> now includes a <code>payment_page_url</code>. Open it in a browser to get a fully-branded checkout page that shows the QR code, lets the customer pay from any UPI app, and polls status in real-time until the payment is confirmed.
+        </p>
+
+        <div className="gw-h4">Extra fields in the create-order response</div>
+        <div className="gw-params-wrap">
+          <table className="gw-params">
+            <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td>public_token</td><td>string</td><td>Hard-to-guess identifier (~22 chars). Safe to share publicly.</td></tr>
+              <tr><td>payment_page_url</td><td>string</td><td>Fully-qualified URL of the hosted checkout page. Send to your customer.</td></tr>
+              <tr><td>qr_image_url</td><td>string</td><td>Direct PNG QR code endpoint. Useful if you embed the QR in your own UI.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div className="gw-h4">Public endpoints (no API token required)</div>
+        <ul className="gw-list">
+          <li><code>GET {baseUrl.replace('/api/gateway','')}/pay/&lt;public_token&gt;</code> <span className="gw-muted">— hosted checkout page</span></li>
+          <li><code>GET /api/pay/&lt;public_token&gt;</code> <span className="gw-muted">— JSON snapshot of public-safe order fields</span></li>
+          <li><code>POST /api/pay/&lt;public_token&gt;/refresh</code> <span className="gw-muted">— re-verifies with Paytm and returns the latest status</span></li>
+          <li><code>GET /api/pay/&lt;public_token&gt;/qr.png</code> <span className="gw-muted">— PNG QR for the order's UPI payload</span></li>
+        </ul>
+
+        <div className="gw-h4">How status updates</div>
+        <ol className="gw-steps">
+          <li>The page loads order details from <code>GET /api/pay/&lt;token&gt;</code>.</li>
+          <li>While the order is <code>pending</code>, the page silently calls the refresh endpoint every 4 seconds (paused when the tab is hidden, capped at 15 minutes).</li>
+          <li>The refresh endpoint re-verifies with Paytm, persists the new status, fires your webhook callback if configured, and returns the updated snapshot.</li>
+          <li>Polling stops automatically when the status becomes <code>paid</code>, <code>failed</code>, or <code>expired</code>, and the page swaps to the matching success / failure card.</li>
+          <li>Customers never see internal IDs, your merchant key, or raw API errors — only public-safe fields.</li>
+        </ol>
+
+        <div className="gw-h4">Security model</div>
+        <ul className="gw-list">
+          <li>Each order has its own ~128-bit random token — no enumeration possible.</li>
+          <li>The hosted page only exposes amount, currency, status, txn_ref, payee name, note and bank RRN. Merchant credentials stay server-side.</li>
+          <li>Webhook callbacks still fire (with the same HMAC signature) when status flips via the hosted page.</li>
+        </ul>
+      </div>
 
       {/* Create Order */}
       <div className="gw-card">

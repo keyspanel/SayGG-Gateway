@@ -8,6 +8,7 @@ import GwDashboard from './Dashboard';
 import GwSettings from './Settings';
 import GwTransactions from './Transactions';
 import GwDocs from './Docs';
+import PayPage from './PayPage';
 
 function FullBoot() {
   return <div className="gw-fullboot" aria-label="Loading" />;
@@ -31,6 +32,7 @@ export default function App() {
   return (
     <GwAuthProvider>
       <Routes>
+        <Route path="/pay/:token" element={<PayPage />} />
         <Route path="/gateway/login" element={<PublicOnly><GwLogin /></PublicOnly>} />
         <Route path="/gateway/register" element={<PublicOnly><GwRegister /></PublicOnly>} />
 

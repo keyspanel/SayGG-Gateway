@@ -1,9 +1,21 @@
 import express, { Response } from 'express';
 import pool from './db';
 import { gwApiToken, GwApiRequest } from './auth-mw';
+import crypto from 'crypto';
 import { buildUniqueTxnRef, buildUpiPayload, verifyPaytmPayment } from './paytm';
 import { sendOrderCallback } from './callback';
 import { apiError, apiSuccess, methodNotAllowed } from './api-response';
+
+function genPublicToken(): string {
+  // url-safe ~22 chars, ~128 bits
+  return crypto.randomBytes(16).toString('base64url');
+}
+
+function buildPaymentPageUrl(req: { protocol: string; get: (h: string) => string | undefined }, token: string): string {
+  const proto = (req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
+  const host = req.get('x-forwarded-host') || req.get('host') || '';
+  return `${proto}://${host}/pay/${token}`;
+}
 
 const router = express.Router();
 
@@ -62,13 +74,23 @@ router.post('/create-order', gwApiToken, async (req: GwApiRequest, res: Response
       note: note || 'Payment',
     });
 
+    // Generate a hard-to-guess public token for the hosted payment page
+    let publicToken = genPublicToken();
+    for (let i = 0; i < 4; i++) {
+      const exists = await pool.query('SELECT 1 FROM gw_orders WHERE public_token=$1 LIMIT 1', [publicToken]);
+      if (!exists.rows[0]) break;
+      publicToken = genPublicToken();
+    }
+
     const ins = await pool.query(
-      `INSERT INTO gw_orders (user_id, client_order_id, txn_ref, amount, currency, status, note, customer_reference, callback_url, upi_payload, payment_link, expires_at)
-       VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9,$9, NOW() + INTERVAL '${ORDER_TTL_MIN} minutes')
+      `INSERT INTO gw_orders (user_id, client_order_id, txn_ref, amount, currency, status, note, customer_reference, callback_url, upi_payload, payment_link, public_token, expires_at)
+       VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9,$9,$10, NOW() + INTERVAL '${ORDER_TTL_MIN} minutes')
        RETURNING id, created_at, expires_at`,
-      [user.id, client_order_id, txnRef, amount.toFixed(2), currency, note, customer_reference, callback_url, upiPayload],
+      [user.id, client_order_id, txnRef, amount.toFixed(2), currency, note, customer_reference, callback_url, upiPayload, publicToken],
     );
     const orderId = ins.rows[0].id;
+    const paymentPageUrl = buildPaymentPageUrl(req, publicToken);
+    const qrImageUrl = `/api/pay/${publicToken}/qr.png`;
 
     apiSuccess(res, 'Order created', {
       order_id: orderId,
@@ -79,6 +101,10 @@ router.post('/create-order', gwApiToken, async (req: GwApiRequest, res: Response
       status: 'pending',
       payment_link: upiPayload,
       upi_payload: upiPayload,
+      // Method 2: hosted payment page
+      public_token: publicToken,
+      payment_page_url: paymentPageUrl,
+      qr_image_url: qrImageUrl,
       created_at: ins.rows[0].created_at,
       expires_at: ins.rows[0].expires_at,
       callback_url: callback_url || undefined,

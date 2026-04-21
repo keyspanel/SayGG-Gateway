@@ -8,6 +8,7 @@ import authRouter from './routes-auth';
 import settingsRouter from './routes-settings';
 import ordersRouter from './routes-orders';
 import publicApiRouter from './routes-public-api';
+import payRouter from './routes-pay';
 import { apiErrorHandler, apiNotFound, gatewayNotFound } from './api-response';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -31,6 +32,7 @@ app.use('/api/gateway', ordersRouter);
 app.use('/api/gateway', publicApiRouter);
 app.all('/api/gateway', gatewayNotFound);
 app.use('/api/gateway', gatewayNotFound);
+app.use('/api/pay', payRouter);
 app.use('/api', apiNotFound);
 app.use(apiErrorHandler);
 
