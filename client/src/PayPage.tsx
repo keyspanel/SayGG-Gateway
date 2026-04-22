@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { UPI_APPS } from './upi-logos';
 
 interface PayOrder {
   public_token: string;
@@ -54,44 +55,62 @@ function formatTimeLeft(ms: number): string {
 }
 
 /**
- * Supported UPI apps shown on the hosted pay page as a confidence strip.
- * These are NOT separate launch buttons — they are recognition badges only.
- * To add or remove an app later, edit this array.
+ * Premium auto-rolling supported-apps strip.
+ * - One app visible at a time, advances every ~1.6s.
+ * - Outgoing item slides left + blurs out; incoming slides in from the right
+ *   starting blurred and sharpens. CSS keyframes drive the animation;
+ *   React only flips the index.
+ * - Pauses while the page is hidden and resumes on visibility.
+ * - Tiny progress dots underneath for orientation.
  */
-const SUPPORTED_UPI_APPS: Array<{ name: string; initial: string; bg: string; fg?: string }> = [
-  { name: 'Google Pay',   initial: 'G',  bg: '#ffffff', fg: '#4285F4' },
-  { name: 'PhonePe',      initial: 'Pe', bg: '#5F259F' },
-  { name: 'Paytm',        initial: 'P',  bg: '#00BAF2' },
-  { name: 'BHIM',         initial: 'B',  bg: '#1A237E' },
-  { name: 'Amazon Pay',   initial: 'a',  bg: '#FF9900', fg: '#0F1111' },
-  { name: 'CRED',         initial: 'C',  bg: '#0A0A0A' },
-  { name: 'WhatsApp',     initial: 'W',  bg: '#25D366' },
-  { name: 'MobiKwik',     initial: 'M',  bg: '#1B3FB6' },
-  { name: 'Freecharge',   initial: 'F',  bg: '#EE3E80' },
-  { name: 'Fampay',       initial: 'F',  bg: '#FFC700', fg: '#0A0A0A' },
-  { name: 'Navi',         initial: 'N',  bg: '#0066FF' },
-  { name: 'Slice',        initial: 'S',  bg: '#7B61FF' },
-];
+const ROLL_INTERVAL_MS = 1600;
 
 function SupportedApps() {
+  const [idx, setIdx] = useState(0);
+  const total = UPI_APPS.length;
+
+  useEffect(() => {
+    let id: number | undefined;
+    const start = () => {
+      stop();
+      id = window.setInterval(() => {
+        setIdx((i) => (i + 1) % total);
+      }, ROLL_INTERVAL_MS);
+    };
+    const stop = () => {
+      if (id !== undefined) { clearInterval(id); id = undefined; }
+    };
+    const onVis = () => {
+      if (document.hidden) stop();
+      else start();
+    };
+    start();
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [total]);
+
+  const app = UPI_APPS[idx];
+  const Logo = app.Logo;
+
   return (
     <div className="pp-apps">
       <div className="pp-apps-head">
         <span className="pp-apps-title">Supported UPI apps</span>
         <span className="pp-apps-sub">Scan with any of these</span>
       </div>
-      <div className="pp-apps-row" role="list" aria-label="Supported UPI apps">
-        {SUPPORTED_UPI_APPS.map((a) => (
-          <div className="pp-app" role="listitem" key={a.name} title={a.name}>
-            <div
-              className="pp-app-mark"
-              style={{ background: a.bg, color: a.fg || '#ffffff' }}
-              aria-hidden="true"
-            >
-              {a.initial}
-            </div>
-            <div className="pp-app-name">{a.name}</div>
-          </div>
+      <div className="pp-apps-stage" aria-live="polite">
+        {/* key forces a fresh mount → CSS enter animation re-runs each tick */}
+        <div className="pp-apps-item" key={idx}>
+          <div className="pp-apps-logo"><Logo /></div>
+          <div className="pp-apps-name">{app.name}</div>
+        </div>
+      </div>
+      <div className="pp-apps-dots" aria-hidden="true">
+        {UPI_APPS.map((_, i) => (
+          <span key={i} className={`pp-apps-dot${i === idx ? ' on' : ''}`} />
         ))}
       </div>
     </div>
