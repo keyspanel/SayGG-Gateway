@@ -1447,31 +1447,53 @@ code {
 }
 .pp-apps-stage {
   position: relative;
-  height: 56px;
+  height: 60px;
   overflow: hidden;
   display: flex; align-items: center; justify-content: center;
+  contain: layout paint;
 }
 .pp-apps-item {
   position: absolute;
   inset: 0;
   display: flex; align-items: center; justify-content: center; gap: 12px;
-  animation: pp-app-roll 700ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation: pp-app-roll 520ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
   will-change: transform, opacity, filter;
 }
 .pp-apps-logo {
-  width: 40px; height: 40px;
+  width: 48px; height: 48px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid rgba(10, 10, 15, 0.08);
+  box-shadow: 0 1px 2px rgba(10, 10, 15, 0.06), 0 1px 0 rgba(255, 255, 255, 0.4) inset;
   display: inline-flex; align-items: center; justify-content: center;
-  filter: drop-shadow(0 1px 2px rgba(10, 10, 15, 0.08));
+  flex: 0 0 auto;
+  overflow: hidden;
 }
-.pp-apps-logo svg { display: block; }
+.pp-apps-logo img {
+  width: 32px; height: 32px;
+  object-fit: contain;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.pp-apps-fallback {
+  width: 100%; height: 100%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 18px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  border-radius: 12px;
+}
 .pp-apps-name {
-  font-size: 14px; font-weight: 600;
+  font-size: 14.5px; font-weight: 600;
   color: var(--gw-text);
   letter-spacing: 0.005em;
+  white-space: nowrap;
 }
 @keyframes pp-app-roll {
-  0%   { opacity: 0; filter: blur(6px); transform: translateX(28px); }
-  60%  { opacity: 1; filter: blur(0); transform: translateX(0); }
+  0%   { opacity: 0; filter: blur(6px); transform: translateX(22px); }
+  55%  { opacity: 1; filter: blur(0); transform: translateX(0); }
   100% { opacity: 1; filter: blur(0); transform: translateX(0); }
 }
 .pp-apps-dots {

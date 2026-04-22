@@ -55,15 +55,40 @@ function formatTimeLeft(ms: number): string {
 }
 
 /**
- * Premium auto-rolling supported-apps strip.
- * - One app visible at a time, advances every ~1.6s.
- * - Outgoing item slides left + blurs out; incoming slides in from the right
- *   starting blurred and sharpens. CSS keyframes drive the animation;
- *   React only flips the index.
- * - Pauses while the page is hidden and resumes on visibility.
- * - Tiny progress dots underneath for orientation.
+ * Auto-rolling supported-apps strip.
+ * - One app visible at a time. Visible duration = ~2s, transition = 500ms.
+ * - Outgoing logo slides left + blurs out; incoming slides in from the right
+ *   starting blurred and sharpens. CSS keyframes drive the motion; React just
+ *   flips the index, so there is no per-frame re-render.
+ * - Pauses while the tab is hidden; resumes on visibility.
+ * - Tiny pill progress dots show position in the loop.
+ * - If a brand SVG ever fails to load, the <img> swaps to a clean letter tile
+ *   in the brand's accent color so the user never sees a broken image icon.
  */
-const ROLL_INTERVAL_MS = 1600;
+const ROLL_INTERVAL_MS = 2000;
+
+function AppLogoImg({ app }: { app: typeof UPI_APPS[number] }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className="pp-apps-fallback" style={{ background: app.accent }} aria-hidden="true">
+        {app.name.charAt(0).toUpperCase()}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={app.logo}
+      alt={app.alt}
+      width={40}
+      height={40}
+      loading="eager"
+      decoding="async"
+      draggable={false}
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 function SupportedApps() {
   const [idx, setIdx] = useState(0);
@@ -92,8 +117,15 @@ function SupportedApps() {
     };
   }, [total]);
 
+  // Preload all logo assets once so transitions never reveal a flash of nothing.
+  useEffect(() => {
+    UPI_APPS.forEach((a) => {
+      const i = new Image();
+      i.src = a.logo;
+    });
+  }, []);
+
   const app = UPI_APPS[idx];
-  const Logo = app.Logo;
 
   return (
     <div className="pp-apps">
@@ -101,10 +133,12 @@ function SupportedApps() {
         <span className="pp-apps-title">Supported UPI apps</span>
         <span className="pp-apps-sub">Scan with any of these</span>
       </div>
-      <div className="pp-apps-stage" aria-live="polite">
+      <div className="pp-apps-stage" aria-live="polite" aria-atomic="true">
         {/* key forces a fresh mount → CSS enter animation re-runs each tick */}
         <div className="pp-apps-item" key={idx}>
-          <div className="pp-apps-logo"><Logo /></div>
+          <div className="pp-apps-logo">
+            <AppLogoImg app={app} />
+          </div>
           <div className="pp-apps-name">{app.name}</div>
         </div>
       </div>
