@@ -110,7 +110,7 @@ export default function PayPage() {
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState<number>(Date.now());
   const [checking, setChecking] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [live, setLive] = useState<LiveState>('connecting');
 
   const startedAtRef = useRef<number>(Date.now());
@@ -294,31 +294,140 @@ export default function PayPage() {
   const expiresMs = order.expires_at ? new Date(order.expires_at).getTime() - now : 0;
   const showCountdown = order.status === 'pending' && order.expires_at && expiresMs > 0;
 
-  const copyUpi = async () => {
-    if (!order.upi_payload) return;
-    try { await navigator.clipboard.writeText(order.upi_payload); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
-  };
-
   /**
-   * Build the Paytm-specific `paytmmp://pay?...` deep link from the canonical
-   * `upi://pay?...` payload. We drop `cu=INR` to match the format Paytm's
-   * own app exposes for direct deep-link launches. All other parameters
-   * (pa with literal `@`, pn, am, tr, tn) are preserved exactly as the
-   * canonical payload already encodes them.
-   *
-   * The QR continues to use the canonical `upi://` payload — this only
-   * changes the "Pay with UPI app" button's launch target.
+   * Render a professional QR card to a canvas and trigger a PNG download.
+   * The card embeds the same QR served at /api/pay/:token/qr.png plus
+   * order details (merchant, amount, order id, note, expiry, reference).
+   * Pure client-side: no extra server route, no extra dependency.
    */
-  const buildPaytmmpLaunch = (upiUrl: string): string => {
-    const q = upiUrl.split('?')[1] || '';
-    const params = q.split('&').filter((p) => p && !p.startsWith('cu='));
-    return `paytmmp://pay?${params.join('&')}`;
-  };
+  const downloadQr = async () => {
+    if (!order || downloading) return;
+    setDownloading(true);
+    try {
+      // Pull a high-resolution QR for crisp printing.
+      const qrRes = await fetch(`/api/pay/${order.public_token}/qr.png?size=720`);
+      const qrBlob = await qrRes.blob();
+      const qrUrl = URL.createObjectURL(qrBlob);
+      const qrImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = qrUrl;
+      });
 
-  const onLaunchUpi = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    if (!order.upi_payload) return;
-    e.preventDefault();
-    window.location.href = buildPaytmmpLaunch(order.upi_payload);
+      // Card geometry — designed for a clean, share-friendly portrait card.
+      const W = 1080;
+      const H = 1620;
+      const canvas = document.createElement('canvas');
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d')!;
+
+      // Background
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, W, H);
+
+      // Soft accent header band
+      ctx.fillStyle = '#0a0a0f';
+      ctx.fillRect(0, 0, W, 180);
+
+      // Brand mark
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '600 36px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('PG', 64, 90);
+      ctx.font = '500 28px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.fillStyle = '#cfd2dc';
+      ctx.fillText('PayGateway · Secure UPI', 130, 90);
+
+      // Merchant
+      ctx.fillStyle = '#0a0a0f';
+      ctx.textBaseline = 'top';
+      ctx.font = '700 56px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.fillText(order.payee_name || 'Merchant', 64, 230);
+
+      ctx.fillStyle = '#5b6172';
+      ctx.font = '500 30px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.fillText('Scan to pay with any UPI app', 64, 308);
+
+      // Amount block
+      ctx.fillStyle = '#0a0a0f';
+      ctx.font = '800 92px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.fillText(`₹${order.amount.toFixed(2)}`, 64, 372);
+      ctx.fillStyle = '#5b6172';
+      ctx.font = '500 28px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.fillText(order.currency || 'INR', 64, 482);
+
+      // QR with thin border
+      const qrSize = 720;
+      const qrX = (W - qrSize) / 2;
+      const qrY = 560;
+      ctx.fillStyle = '#eef0f5';
+      ctx.fillRect(qrX - 16, qrY - 16, qrSize + 32, qrSize + 32);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(qrX, qrY, qrSize, qrSize);
+      ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+
+      // Detail block
+      const detailY = qrY + qrSize + 60;
+      ctx.fillStyle = '#0a0a0f';
+      ctx.font = '600 30px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      const orderRefLabel = order.client_order_id || order.txn_ref;
+      const lines: Array<[string, string]> = [
+        ['Order', orderRefLabel],
+      ];
+      if (order.note) lines.push(['Note', order.note]);
+      if (order.expires_at) {
+        const exp = new Date(order.expires_at);
+        lines.push(['Expires', exp.toLocaleString()]);
+      }
+      lines.push(['Reference', order.txn_ref]);
+
+      let ly = detailY;
+      for (const [label, value] of lines) {
+        ctx.fillStyle = '#8b91a3';
+        ctx.font = '500 26px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+        ctx.fillText(label, 64, ly);
+        ctx.fillStyle = '#0a0a0f';
+        ctx.font = '600 30px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+        // Truncate very long values to keep the card clean.
+        const maxChars = 38;
+        const v = value.length > maxChars ? value.slice(0, maxChars - 1) + '…' : value;
+        ctx.fillText(v, 240, ly - 2);
+        ly += 56;
+      }
+
+      // Footer
+      ctx.fillStyle = '#eef0f5';
+      ctx.fillRect(0, H - 80, W, 80);
+      ctx.fillStyle = '#5b6172';
+      ctx.font = '500 24px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Secured by PayGateway', 64, H - 40);
+      ctx.textAlign = 'right';
+      ctx.fillText(order.txn_ref, W - 64, H - 40);
+      ctx.textAlign = 'left';
+
+      const pngBlob: Blob = await new Promise((resolve, reject) => {
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png');
+      });
+      const url = URL.createObjectURL(pngBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `payment-qr-${orderRefLabel}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(qrUrl);
+      }, 1000);
+    } catch (e) {
+      // Surface a soft alert; the QR is still visible on-page.
+      alert('Could not prepare QR download. Please try again.');
+    } finally {
+      setDownloading(false);
+    }
   };
 
   const orderRefId = order.client_order_id || order.txn_ref;
@@ -380,15 +489,19 @@ export default function PayPage() {
           </div>
           <ol className="pp-steps">
             <li>Open any UPI app — GPay, PhonePe, Paytm, BHIM.</li>
-            <li>Scan the QR or tap the button below on a phone.</li>
+            <li>Scan the QR with your UPI app, or download it to share.</li>
             <li>Approve <b>₹{order.amount.toFixed(2)}</b>.</li>
             <li>Status updates here automatically.</li>
           </ol>
           <div className="pp-actions">
-            {order.upi_payload && (
-              <a href={order.upi_payload} onClick={onLaunchUpi} className="pp-btn primary">Pay with UPI app</a>
-            )}
-            <button className="pp-btn ghost" onClick={copyUpi}>{copied ? 'Copied ✓' : 'Copy link'}</button>
+            <button
+              type="button"
+              className="pp-btn primary"
+              onClick={downloadQr}
+              disabled={downloading}
+            >
+              {downloading ? 'Preparing…' : 'Download QR Code'}
+            </button>
           </div>
           <div className="pp-poll-row">
             <span className={`pp-dot ${liveClass}`} />
