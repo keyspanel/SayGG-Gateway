@@ -53,6 +53,51 @@ function formatTimeLeft(ms: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+/**
+ * Supported UPI apps shown on the hosted pay page as a confidence strip.
+ * These are NOT separate launch buttons — they are recognition badges only.
+ * To add or remove an app later, edit this array.
+ */
+const SUPPORTED_UPI_APPS: Array<{ name: string; initial: string; bg: string; fg?: string }> = [
+  { name: 'Google Pay',   initial: 'G',  bg: '#ffffff', fg: '#4285F4' },
+  { name: 'PhonePe',      initial: 'Pe', bg: '#5F259F' },
+  { name: 'Paytm',        initial: 'P',  bg: '#00BAF2' },
+  { name: 'BHIM',         initial: 'B',  bg: '#1A237E' },
+  { name: 'Amazon Pay',   initial: 'a',  bg: '#FF9900', fg: '#0F1111' },
+  { name: 'CRED',         initial: 'C',  bg: '#0A0A0A' },
+  { name: 'WhatsApp',     initial: 'W',  bg: '#25D366' },
+  { name: 'MobiKwik',     initial: 'M',  bg: '#1B3FB6' },
+  { name: 'Freecharge',   initial: 'F',  bg: '#EE3E80' },
+  { name: 'Fampay',       initial: 'F',  bg: '#FFC700', fg: '#0A0A0A' },
+  { name: 'Navi',         initial: 'N',  bg: '#0066FF' },
+  { name: 'Slice',        initial: 'S',  bg: '#7B61FF' },
+];
+
+function SupportedApps() {
+  return (
+    <div className="pp-apps">
+      <div className="pp-apps-head">
+        <span className="pp-apps-title">Supported UPI apps</span>
+        <span className="pp-apps-sub">Scan with any of these</span>
+      </div>
+      <div className="pp-apps-row" role="list" aria-label="Supported UPI apps">
+        {SUPPORTED_UPI_APPS.map((a) => (
+          <div className="pp-app" role="listitem" key={a.name} title={a.name}>
+            <div
+              className="pp-app-mark"
+              style={{ background: a.bg, color: a.fg || '#ffffff' }}
+              aria-hidden="true"
+            >
+              {a.initial}
+            </div>
+            <div className="pp-app-name">{a.name}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function StatusVisual({ order }: { order: PayOrder }) {
   if (order.status === 'paid') {
     return (
@@ -493,6 +538,7 @@ export default function PayPage() {
             <li>Approve <b>₹{order.amount.toFixed(2)}</b>.</li>
             <li>Status updates here automatically.</li>
           </ol>
+          <SupportedApps />
           <div className="pp-actions">
             <button
               type="button"
