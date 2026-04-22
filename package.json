@@ -5,6 +5,7 @@
   "description": "Standalone Payment Gateway website + public API (isolated from Keys Bot).",
   "scripts": {
     "build": "vite build --config client/vite.config.ts",
+    "vercel-build": "vite build --config client/vite.config.ts",
     "start": "tsx server/index.ts",
     "dev": "npm run build && npm run start"
   },

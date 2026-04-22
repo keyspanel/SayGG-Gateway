@@ -1,48 +1,26 @@
+/**
+ * Local / Replit entry point.
+ *
+ * On Vercel this file is NOT used — Vercel calls `api/[...all].ts` per
+ * request. Here we do everything Vercel handles automatically in production:
+ *   - listen on a TCP port
+ *   - serve the built Vite client + SPA fallback
+ *   - run database migrations once at boot
+ *   - start the in-process reconciler timer
+ */
 import express from 'express';
-import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import config from './config';
-import { runGatewayMigrations } from './migrations';
-import authRouter from './routes-auth';
-import settingsRouter from './routes-settings';
-import ordersRouter from './routes-orders';
-import publicApiRouter from './routes-public-api';
-import payRouter from './routes-pay';
-import { apiErrorHandler, apiNotFound, gatewayNotFound } from './api-response';
+import app, { ensureMigrations } from './app';
 import { startReconciler } from './reconciler';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
-
-// Trust proxy so req.ip and X-Forwarded-For work behind Replit's edge.
-app.set('trust proxy', 1);
-
-app.use(cors());
-app.use(express.json({ limit: '256kb' }));
-app.use(express.urlencoded({ extended: true, limit: '256kb' }));
-
-// Health
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'payment-gateway' });
-});
-
-// Mount API routers (kept under /api/gateway/* for backwards compat with docs/clients)
-app.use('/api/gateway/auth', authRouter);
-app.use('/api/gateway/settings', settingsRouter);
-app.use('/api/gateway', ordersRouter);
-app.use('/api/gateway', publicApiRouter);
-app.all('/api/gateway', gatewayNotFound);
-app.use('/api/gateway', gatewayNotFound);
-app.use('/api/pay', payRouter);
-app.use('/api', apiNotFound);
-app.use(apiErrorHandler);
-
+// Static client + SPA fallback (Vercel serves these from the CDN in prod).
 const clientDist = path.resolve(__dirname, '..', 'client', 'dist');
 app.use(express.static(clientDist));
-
 app.get(/^(?!\/api\/).*/, (_req, res) => {
   res.sendFile(path.join(clientDist, 'index.html'));
 });
@@ -50,7 +28,7 @@ app.get(/^(?!\/api\/).*/, (_req, res) => {
 app.listen(config.port, '0.0.0.0', async () => {
   console.log(`[gateway] Payment Gateway running on port ${config.port}`);
   try {
-    await runGatewayMigrations();
+    await ensureMigrations();
     startReconciler();
   } catch (e) {
     console.error('[gateway] startup error', e);

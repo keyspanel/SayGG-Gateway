@@ -164,3 +164,26 @@ export function startReconciler(): void {
 export function stopReconciler(): void {
   if (timer) { clearInterval(timer); timer = null; }
 }
+
+/**
+ * Runs exactly one reconciler pass. Used by the Vercel Cron entry point
+ * (`/api/cron/reconcile`) to do the same work the in-process timer does
+ * locally, but without holding any background timer in serverless.
+ * Returns a small summary so cron logs are useful.
+ */
+export async function runReconcileTick(): Promise<{
+  expired: number;
+  verified: number;
+  callbacks: number;
+}> {
+  if (running) return { expired: 0, verified: 0, callbacks: 0 };
+  running = true;
+  try {
+    const expired = await expireStalePending().catch(() => 0);
+    const verified = await verifyRecentPending().catch(() => 0);
+    const callbacks = await retryDueCallbacks().catch(() => 0);
+    return { expired, verified, callbacks };
+  } finally {
+    running = false;
+  }
+}
