@@ -1509,6 +1509,42 @@ code {
   width: 12px; border-radius: 3px;
   background: var(--gw-primary, #4f46e5);
 }
+.pp-apps-tap {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 4px 10px;
+  margin: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  border-radius: 12px;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: transform 120ms ease, background-color 160ms ease;
+}
+.pp-apps-tap:hover { background-color: rgba(10, 10, 15, 0.04); }
+.pp-apps-tap:active { transform: scale(0.97); }
+.pp-apps-tap:focus-visible {
+  outline: 2px solid var(--gw-primary, #4f46e5);
+  outline-offset: 2px;
+}
+.pp-apps-toast {
+  margin-top: 6px;
+  min-height: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--gw-text-mute);
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 220ms ease, transform 220ms ease;
+  pointer-events: none;
+}
+.pp-apps-toast.show {
+  opacity: 1;
+  transform: translateY(0);
+  color: var(--gw-text);
+}
 @media (prefers-reduced-motion: reduce) {
   .pp-apps-item { animation: none; }
 }

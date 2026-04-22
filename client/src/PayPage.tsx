@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { UPI_APPS } from './upi-logos';
+import { openAppHome } from './open-app';
 
 interface PayOrder {
   public_token: string;
@@ -92,13 +93,20 @@ function AppLogoImg({ app }: { app: typeof UPI_APPS[number] }) {
 
 function SupportedApps() {
   const [idx, setIdx] = useState(0);
+  const [toast, setToast] = useState<string | null>(null);
   const total = UPI_APPS.length;
+  // When user taps an item we briefly suspend auto-rotation so the carousel
+  // doesn't slide out from under them mid-tap. The interval keeps running but
+  // skips ticks while pauseUntilRef is in the future — no animation reset.
+  const pauseUntilRef = useRef<number>(0);
+  const toastTimerRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     let id: number | undefined;
     const start = () => {
       stop();
       id = window.setInterval(() => {
+        if (Date.now() < pauseUntilRef.current) return;
         setIdx((i) => (i + 1) % total);
       }, ROLL_INTERVAL_MS);
     };
@@ -125,27 +133,58 @@ function SupportedApps() {
     });
   }, []);
 
+  // Cleanup any pending toast timer on unmount.
+  useEffect(() => () => {
+    if (toastTimerRef.current !== undefined) {
+      clearTimeout(toastTimerRef.current);
+    }
+  }, []);
+
   const app = UPI_APPS[idx];
+
+  const handleTap = useCallback(() => {
+    // Capture the app at tap time and suspend rotation for ~4s so the user has
+    // a stable target and doesn't see the next app slide in mid-tap.
+    pauseUntilRef.current = Date.now() + 4000;
+    const result = openAppHome(app);
+    setToast(result.hint);
+    if (toastTimerRef.current !== undefined) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 3500);
+  }, [app]);
 
   return (
     <div className="pp-apps">
       <div className="pp-apps-head">
         <span className="pp-apps-title">Supported UPI apps</span>
-        <span className="pp-apps-sub">Scan with any of these</span>
+        <span className="pp-apps-sub">Tap to open · scan downloaded QR</span>
       </div>
       <div className="pp-apps-stage" aria-live="polite" aria-atomic="true">
         {/* key forces a fresh mount → CSS enter animation re-runs each tick */}
-        <div className="pp-apps-item" key={idx}>
+        <button
+          type="button"
+          className="pp-apps-item pp-apps-tap"
+          key={idx}
+          onClick={handleTap}
+          aria-label={`Open ${app.name}`}
+          title={`Open ${app.name}`}
+        >
           <div className="pp-apps-logo">
             <AppLogoImg app={app} />
           </div>
           <div className="pp-apps-name">{app.name}</div>
-        </div>
+        </button>
       </div>
       <div className="pp-apps-dots" aria-hidden="true">
         {UPI_APPS.map((_, i) => (
           <span key={i} className={`pp-apps-dot${i === idx ? ' on' : ''}`} />
         ))}
+      </div>
+      <div
+        className={`pp-apps-toast${toast ? ' show' : ''}`}
+        role="status"
+        aria-live="polite"
+      >
+        {toast || '\u00A0'}
       </div>
     </div>
   );
