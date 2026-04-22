@@ -10,7 +10,7 @@ frontend and the backend on one Vercel project.
 | Static frontend (Vite SPA) | Built into `client/dist`, served by Vercel's CDN |
 | API (`/api/*`) | A single catch-all serverless function: `api/[...all].ts`, which mounts the same Express app used locally (`server/app.ts`) |
 | SPA route refresh | `vercel.json` `rewrites` send any non-API, non-asset path to `/index.html` |
-| Background reconciler | Replaced by Vercel **Cron** hitting `/api/cron/reconcile` every minute |
+| Background reconciler | Triggered by an **external free scheduler** (e.g. cron-job.org) hitting `/api/cron/reconcile` every minute. Vercel's Hobby plan only allows once-per-day cron, so the schedule lives outside Vercel. |
 | Database | Standard `pg.Pool`, `max=5`, SSL auto-enabled for managed providers |
 | Migrations | Run lazily on the first request after every cold start (idempotent SQL) |
 
@@ -40,7 +40,7 @@ Set these in **Vercel → Project → Settings → Environment Variables** for t
 |---|---|---|
 | `DATABASE_URL` | yes | Postgres connection string. Use a managed provider that supports many short-lived connections (Neon, Supabase pooled endpoint, Railway, etc.). Should normally include `?sslmode=require`. |
 | `JWT_SECRET` | yes | Long random string. Server refuses to boot in production without it. |
-| `CRON_SECRET` | yes | Long random string. Vercel automatically sends `Authorization: Bearer ${CRON_SECRET}` to scheduled cron paths; the `/api/cron/reconcile` handler enforces it. |
+| `CRON_SECRET` | yes | Long random string. The `/api/cron/reconcile` handler requires `Authorization: Bearer ${CRON_SECRET}`. You will paste the same value into the external scheduler's request-header config (see "Schedule the reconciler" below). |
 | `NODE_ENV` | optional | Vercel sets this to `production` automatically. |
 
 ## Vercel project settings
@@ -53,6 +53,34 @@ When importing the repo in the Vercel dashboard:
 - **Output Directory:** *(inherited from `vercel.json` → `client/dist`)*
 - **Install Command:** *(default `npm install` — fine)*
 - **Node.js Version:** 20.x
+
+## Schedule the reconciler (external free scheduler)
+
+Vercel Hobby caps cron jobs at **once per day**, which is too slow for order
+expiry / webhook retries. Instead, schedule the same endpoint from any free
+external pinger that supports custom request headers. Pick one:
+
+- **cron-job.org** (recommended — free, 1-minute granularity, custom headers).
+- **Cloudflare Workers Cron Triggers** (free, 1-minute, very reliable).
+- **UptimeRobot** (free, 5-minute minimum — acceptable, just means expiry runs slightly less often).
+
+Configure one job:
+
+| Field | Value |
+|---|---|
+| URL | `https://<your-domain>/api/cron/reconcile` |
+| Method | `GET` (or `POST` — both work) |
+| Schedule | every 1 minute |
+| Header | `Authorization: Bearer <your CRON_SECRET>` |
+
+A successful run returns:
+
+```json
+{ "ok": true, "expired": 0, "verified": 1, "callbacks": 0 }
+```
+
+A 401 means the header is missing or `CRON_SECRET` does not match what's set
+in Vercel.
 
 ## Routing behavior (final)
 
@@ -94,5 +122,5 @@ vercel dev             # local emulator: serves /api + static + rewrites
 4. Static assets: `https://<your-domain>/payment-apps/google-pay.svg` returns the SVG
 5. Sign in → dashboard loads, settings save, an order can be created via the public API
 6. Hosted pay page (`/pay/<token>`): QR renders, supported-apps carousel rolls, "Download QR Code" works, status updates via polling
-7. After ~1 minute check **Vercel → Logs → Crons** — you should see successful invocations of `/api/cron/reconcile` returning `{ ok: true, expired, verified, callbacks }`
+7. After ~1 minute check your external scheduler's run history (e.g. cron-job.org → Job → "Execution history") — you should see HTTP 200 responses; the body returned is `{ ok: true, expired, verified, callbacks }`. Vercel → Logs will also show the corresponding function invocations.
 8. In the database, confirm a new test order's `status` transitions correctly (`pending` → `paid` / `expired`) — proves the cron-driven reconciler is doing the same work the local timer used to do

@@ -15,7 +15,7 @@ Standalone Payment Gateway website with an Express API, React/Vite frontend, and
 
 ## Deployment targets
 - **Replit / local:** `server/index.ts` listens on port 5000, serves `client/dist`, runs the in-process reconciler timer (`startReconciler`). This file is the only thing that does any of those.
-- **Vercel:** the catch-all serverless function `api/[...all].ts` wraps `server/app.ts` (the same Express app, minus listen/static/timers). The Vite build output `client/dist` is served by Vercel's CDN. The reconciler runs as a Vercel Cron hitting `/api/cron/reconcile` every minute (gated by `CRON_SECRET`). See `DEPLOY_VERCEL.md` for the full guide, env vars, and verification checklist.
+- **Vercel:** the catch-all serverless function `api/[...all].ts` wraps `server/app.ts` (the same Express app, minus listen/static/timers). The Vite build output `client/dist` is served by Vercel's CDN. The reconciler is triggered by an external free scheduler (e.g. cron-job.org) hitting `/api/cron/reconcile` every minute (gated by `CRON_SECRET`) — Vercel Hobby's once-per-day cron is too slow. See `DEPLOY_VERCEL.md` for the full guide, env vars, scheduler setup, and verification checklist.
 
 ## Current UI/API Notes
 - Gateway UI is scoped under `client/src/*` and `client/src/gateway.css` with a mobile-first payment-console design.

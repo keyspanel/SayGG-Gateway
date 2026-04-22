@@ -10,8 +10,5 @@
   },
   "rewrites": [
     { "source": "/((?!api/|assets/|payment-apps/|favicon.ico|robots.txt).*)", "destination": "/index.html" }
-  ],
-  "crons": [
-    { "path": "/api/cron/reconcile", "schedule": "* * * * *" }
   ]
 }
