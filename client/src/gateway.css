@@ -1604,33 +1604,176 @@ code {
 
 .pp-result .pp-meta-row { margin-top: 4px; padding-top: 12px; border-top: 1px dashed var(--gw-border); }
 
-/* Post-paid auto-redirect block — sits inside .pp-result, matches pp-card vibe */
+/* ──────────────────────────────────────────────────────────────────────────
+   Post-paid auto-redirect card. Sits inside .pp-result, picks up the success
+   palette, and is built mobile-first so it stays usable down to ~320px.
+   The countdown ring + linear bar are driven by a single CSS variable
+   --pp-redir-total set from React, so animations stay perfectly in sync
+   with the JS-driven digit (no off-by-one between visual and number).
+   ────────────────────────────────────────────────────────────────────────── */
 .pp-redirect {
-  margin-top: 12px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: var(--gw-ok-bg);
+  --pp-redir-total: 5s;
+  --pp-redir-accent: var(--gw-ok, #16a34a);
+  --pp-redir-accent-soft: rgba(22, 163, 74, 0.14);
+  --pp-redir-ring-c: 150.7964;   /* circumference of r=24 circle */
+  position: relative;
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(22,163,74,0.06), rgba(22,163,74,0) 60%),
+    var(--gw-surface, #fff);
   border: 1px solid rgba(22, 163, 74, 0.22);
-  display: flex; flex-direction: column; gap: 10px;
+  box-shadow: 0 1px 2px rgba(10, 10, 15, 0.04), 0 6px 18px -10px rgba(22, 163, 74, 0.18);
+  display: flex; flex-direction: column; gap: 14px;
+  overflow: hidden;
+  animation: pp-redirect-in 320ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
-.pp-redirect-count {
-  font-size: 13px;
-  color: var(--gw-text);
+@keyframes pp-redirect-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.pp-redirect-head {
+  display: flex; align-items: center; gap: 14px;
+  min-width: 0;
+}
+.pp-redirect-text { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 3px; }
+.pp-redirect-title {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 15px; font-weight: 700; color: var(--gw-text);
+  line-height: 1.25;
+  letter-spacing: -0.005em;
+}
+.pp-redirect-sub {
+  font-size: 13px; color: var(--gw-text-mute);
   line-height: 1.45;
+  /* Truncate long hostnames gracefully on narrow screens */
+  overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  word-break: break-word;
 }
-.pp-redirect-count strong { color: var(--gw-ok); font-weight: 700; }
-.pp-redirect-count b {
-  display: inline-block; min-width: 16px;
-  font-variant-numeric: tabular-nums;
+.pp-redirect-sub b {
   font-weight: 700; color: var(--gw-text);
+  font-feature-settings: "tnum" 1;
 }
-.pp-redirect-note {
-  font-size: 12.5px;
+
+.pp-redirect-check {
+  width: 18px; height: 18px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--pp-redir-accent);
+  color: #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px var(--pp-redir-accent-soft);
+}
+
+/* Circular countdown ring */
+.pp-redirect-ring {
+  position: relative;
+  width: 56px; height: 56px;
+  flex: 0 0 56px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pp-redirect-ring svg { display: block; transform: rotate(-90deg); }
+.pp-redirect-ring-track {
+  fill: none; stroke: rgba(22, 163, 74, 0.18); stroke-width: 4;
+}
+.pp-redirect-ring-fill {
+  fill: none;
+  stroke: var(--pp-redir-accent);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-dasharray: var(--pp-redir-ring-c);
+  stroke-dashoffset: 0;
+  animation: pp-redirect-ring-deplete var(--pp-redir-total) linear forwards;
+  filter: drop-shadow(0 0 4px rgba(22, 163, 74, 0.35));
+}
+@keyframes pp-redirect-ring-deplete {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: var(--pp-redir-ring-c); }
+}
+.pp-redirect-ring-num {
+  position: absolute;
+  font-size: 18px; font-weight: 800;
+  color: var(--gw-text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+/* Generic icon chip used in the cancelled state */
+.pp-redirect-icon {
+  width: 40px; height: 40px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 12px;
+  background: var(--gw-bg-2, #f4f5f7);
   color: var(--gw-text-mute);
-  line-height: 1.45;
+  border: 1px solid var(--gw-border);
 }
+
+/* Spinner used in the "redirecting…" state */
+.pp-redirect-spin {
+  width: 22px; height: 22px; flex: none;
+  border-radius: 50%;
+  border: 2.5px solid var(--pp-redir-accent-soft);
+  border-top-color: var(--pp-redir-accent);
+  animation: pp-redirect-spin 720ms linear infinite;
+}
+@keyframes pp-redirect-spin { to { transform: rotate(360deg); } }
+
+/* Thin linear progress under the head, mirrors the ring duration */
+.pp-redirect-bar {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(22, 163, 74, 0.14);
+  overflow: hidden;
+}
+.pp-redirect-bar-fill {
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, var(--pp-redir-accent), #22c55e);
+  transform-origin: left center;
+  animation: pp-redirect-bar-deplete var(--pp-redir-total) linear forwards;
+}
+@keyframes pp-redirect-bar-deplete {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
 .pp-redirect-actions {
-  display: flex; gap: 8px; flex-wrap: wrap;
+  display: flex; gap: 10px;
+  flex-wrap: wrap;
+}
+.pp-redirect-cta {
+  flex: 1 1 auto;
+  gap: 8px;
+}
+.pp-redirect-cancel {
+  flex: 1 1 auto;
+}
+
+/* Mobile: stack everything full-width, give buttons tappable height,
+   shrink the ring slightly so the title has more room. */
+@media (max-width: 480px) {
+  .pp-redirect { padding: 14px; gap: 12px; border-radius: 12px; }
+  .pp-redirect-head { gap: 12px; }
+  .pp-redirect-ring { width: 48px; height: 48px; flex-basis: 48px; }
+  .pp-redirect-ring svg { width: 48px; height: 48px; }
+  .pp-redirect-ring-num { font-size: 16px; }
+  .pp-redirect-title { font-size: 14.5px; }
+  .pp-redirect-sub { font-size: 12.5px; }
+  .pp-redirect-actions { flex-direction: column; gap: 8px; }
+  .pp-redirect-cta,
+  .pp-redirect-cancel { width: 100%; min-height: 44px; }
+}
+
+/* Respect users who prefer reduced motion: keep the ring/bar static at full
+   so they still convey "time remaining" via the digit. */
+@media (prefers-reduced-motion: reduce) {
+  .pp-redirect { animation: none; }
+  .pp-redirect-ring-fill,
+  .pp-redirect-bar-fill,
+  .pp-redirect-spin { animation: none; }
 }
 
 .pp-notfound { text-align: center; padding: 24px 20px; }

@@ -225,15 +225,36 @@ function RedirectPanel({ order }: { order: PayOrder }) {
 
   if (!targetUrl) return null;
 
+  // Display-only host for trust signal ("Returning to merchant.com").
+  // We never show query params or paths — only the bare hostname.
+  let destHost = '';
+  try { destHost = new URL(targetUrl).hostname.replace(/^www\./, ''); } catch { destHost = ''; }
+
   if (cancelled) {
     return (
-      <div className="pp-redirect">
-        <div className="pp-redirect-note">
-          Auto redirect cancelled. You can close this page or continue manually.
+      <div className="pp-redirect pp-redirect--cancelled" role="group" aria-label="Auto-redirect cancelled">
+        <div className="pp-redirect-head">
+          <div className="pp-redirect-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M9 12h6" />
+            </svg>
+          </div>
+          <div className="pp-redirect-text">
+            <div className="pp-redirect-title">Auto-redirect cancelled</div>
+            <div className="pp-redirect-sub">
+              {destHost
+                ? <>You can continue to <b>{destHost}</b> when you're ready.</>
+                : <>You can continue to the merchant when you're ready.</>}
+            </div>
+          </div>
         </div>
         <div className="pp-redirect-actions">
-          <button type="button" className="pp-btn primary" onClick={performRedirect}>
+          <button type="button" className="pp-btn primary pp-redirect-cta" onClick={performRedirect}>
             Continue to merchant
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M5 12h14" /><path d="M13 5l7 7-7 7" />
+            </svg>
           </button>
         </div>
       </div>
@@ -242,23 +263,65 @@ function RedirectPanel({ order }: { order: PayOrder }) {
 
   if (redirected) {
     return (
-      <div className="pp-redirect">
-        <div className="pp-redirect-note">Redirecting…</div>
+      <div className="pp-redirect pp-redirect--going" role="status" aria-live="polite">
+        <div className="pp-redirect-head">
+          <div className="pp-redirect-spin" aria-hidden="true" />
+          <div className="pp-redirect-text">
+            <div className="pp-redirect-title">Taking you back…</div>
+            <div className="pp-redirect-sub">
+              {destHost ? <>Opening <b>{destHost}</b></> : <>Opening merchant page</>}
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
 
+  // Live countdown view. The animated ring is driven by a single CSS
+  // animation whose duration matches REDIRECT_COUNTDOWN_SECONDS so the
+  // ring depletes smoothly while the digit ticks once per second.
   return (
-    <div className="pp-redirect">
-      <div className="pp-redirect-count" aria-live="polite">
-        <strong>Payment successful.</strong>
-        <span> Redirecting in <b>{remaining}</b> {remaining === 1 ? 'second' : 'seconds'}…</span>
+    <div
+      className="pp-redirect pp-redirect--live"
+      role="group"
+      aria-label="Redirecting to merchant after successful payment"
+      style={{ ['--pp-redir-total' as string]: `${REDIRECT_COUNTDOWN_SECONDS}s` }}
+    >
+      <div className="pp-redirect-head">
+        <div className="pp-redirect-ring" aria-hidden="true">
+          <svg viewBox="0 0 56 56" width="56" height="56">
+            <circle className="pp-redirect-ring-track" cx="28" cy="28" r="24" />
+            <circle className="pp-redirect-ring-fill"  cx="28" cy="28" r="24" />
+          </svg>
+          <span className="pp-redirect-ring-num" aria-live="polite">{remaining}</span>
+        </div>
+        <div className="pp-redirect-text">
+          <div className="pp-redirect-title">
+            <span className="pp-redirect-check" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12.5l4.5 4.5L19 7.5" />
+              </svg>
+            </span>
+            Payment successful
+          </div>
+          <div className="pp-redirect-sub">
+            {destHost
+              ? <>Redirecting to <b>{destHost}</b> in {remaining}s</>
+              : <>Redirecting to merchant in {remaining}s</>}
+          </div>
+        </div>
+      </div>
+      <div className="pp-redirect-bar" aria-hidden="true">
+        <div className="pp-redirect-bar-fill" />
       </div>
       <div className="pp-redirect-actions">
-        <button type="button" className="pp-btn primary" onClick={performRedirect}>
+        <button type="button" className="pp-btn primary pp-redirect-cta" onClick={performRedirect}>
           Redirect now
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M5 12h14" /><path d="M13 5l7 7-7 7" />
+          </svg>
         </button>
-        <button type="button" className="pp-btn ghost" onClick={() => { stopTimers(); setCancelled(true); }}>
+        <button type="button" className="pp-btn ghost pp-redirect-cancel" onClick={() => { stopTimers(); setCancelled(true); }}>
           Stay on this page
         </button>
       </div>
