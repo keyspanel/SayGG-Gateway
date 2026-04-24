@@ -83,6 +83,11 @@ CREATE INDEX IF NOT EXISTS idx_gw_orders_callback_due
 -- application layer before insert.
 ALTER TABLE gw_orders ADD COLUMN IF NOT EXISTS redirect_url TEXT;
 
+-- Browser redirect URL when the order ends in failed / expired / cancelled.
+-- Same validation rules as redirect_url; allows merchants to send the
+-- customer back to a retry / cart page on unsuccessful payments.
+ALTER TABLE gw_orders ADD COLUMN IF NOT EXISTS cancel_url TEXT;
+
 -- Append-only audit log for order lifecycle visibility
 CREATE TABLE IF NOT EXISTS gw_order_events (
   id BIGSERIAL PRIMARY KEY,

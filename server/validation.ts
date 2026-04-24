@@ -163,7 +163,10 @@ export function parseCallbackUrlShape(raw: unknown): { ok: true; value: string |
 }
 
 /* -------------------------------------------------------------------------- */
-/* Redirect URL — browser-side success redirect (separate from webhooks)      */
+/* Browser redirect URLs — success (redirect_url) and failure (cancel_url).   */
+/* Both share the same SSRF / scheme / credential / private-IP guards but    */
+/* report errors against their own field name so the merchant sees a clear   */
+/* validation message.                                                        */
 /* -------------------------------------------------------------------------- */
 
 const ALLOW_PRIVATE_REDIRECT = process.env.ALLOW_PRIVATE_REDIRECT_URLS === '1';
@@ -171,11 +174,9 @@ const ALLOW_HTTP_REDIRECT    = process.env.ALLOW_HTTP_REDIRECT_URLS === '1';
 const IS_PROD                = process.env.NODE_ENV === 'production';
 
 /**
- * Validate a customer-facing browser redirect URL used by the hosted pay
- * page after a payment is verified as paid. Intentionally separate from the
- * server-to-server callback_url validator so the two surfaces stay independent.
+ * Internal: validate a customer-facing browser redirect URL.
  *
- * Rules:
+ * Rules (identical for redirect_url and cancel_url):
  *  - Optional (empty/null/undefined → null).
  *  - Must be an absolute http(s) URL, max 500 chars.
  *  - Production requires https unless ALLOW_HTTP_REDIRECT_URLS=1.
@@ -183,28 +184,31 @@ const IS_PROD                = process.env.NODE_ENV === 'production';
  *  - No localhost, .localhost, .internal, .local, or private/loopback/
  *    link-local/reserved IPs unless ALLOW_PRIVATE_REDIRECT_URLS=1.
  */
-export function parseRedirectUrlShape(raw: unknown): { ok: true; value: string | null } | { ok: false; err: FieldError } {
+function parseBrowserUrlShape(
+  raw: unknown,
+  field: 'redirect_url' | 'cancel_url',
+): { ok: true; value: string | null } | { ok: false; err: FieldError } {
   if (raw === null || raw === undefined || raw === '') return { ok: true, value: null };
   const s = String(raw).trim();
   if (!s) return { ok: true, value: null };
   if (s.length > 500) {
-    return { ok: false, err: { code: 'VALIDATION_ERROR', message: 'redirect_url must be 500 characters or fewer', field: 'redirect_url' } };
+    return { ok: false, err: { code: 'VALIDATION_ERROR', message: `${field} must be 500 characters or fewer`, field } };
   }
   let u: URL;
   try { u = new URL(s); } catch {
-    return { ok: false, err: { code: 'VALIDATION_ERROR', message: 'redirect_url is not a valid absolute URL', field: 'redirect_url' } };
+    return { ok: false, err: { code: 'VALIDATION_ERROR', message: `${field} is not a valid absolute URL`, field } };
   }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') {
-    return { ok: false, err: { code: 'VALIDATION_ERROR', message: 'redirect_url must use http or https', field: 'redirect_url' } };
+    return { ok: false, err: { code: 'VALIDATION_ERROR', message: `${field} must use http or https`, field } };
   }
   // In production, https is required unless ALLOW_HTTP_REDIRECT_URLS=1
   // explicitly opts in. In non-production environments http is permitted so
   // local merchant integrations and end-to-end tests can run unblocked.
   if (u.protocol === 'http:' && IS_PROD && !ALLOW_HTTP_REDIRECT) {
-    return { ok: false, err: { code: 'VALIDATION_ERROR', message: 'redirect_url must use https', field: 'redirect_url' } };
+    return { ok: false, err: { code: 'VALIDATION_ERROR', message: `${field} must use https`, field } };
   }
   if (u.username || u.password) {
-    return { ok: false, err: { code: 'VALIDATION_ERROR', message: 'redirect_url must not embed credentials', field: 'redirect_url' } };
+    return { ok: false, err: { code: 'VALIDATION_ERROR', message: `${field} must not embed credentials`, field } };
   }
   const host = u.hostname.toLowerCase();
   if (!ALLOW_PRIVATE_REDIRECT) {
@@ -214,19 +218,29 @@ export function parseRedirectUrlShape(raw: unknown): { ok: true; value: string |
       host.endsWith('.internal') ||
       host.endsWith('.local')
     ) {
-      return { ok: false, err: { code: 'VALIDATION_ERROR', message: 'redirect_url host is not allowed', field: 'redirect_url' } };
+      return { ok: false, err: { code: 'VALIDATION_ERROR', message: `${field} host is not allowed`, field } };
     }
     if (net.isIP(host)) {
       const priv = net.isIPv4(host) ? isPrivateIPv4(host) : isPrivateIPv6(host);
-      if (priv) return { ok: false, err: { code: 'VALIDATION_ERROR', message: 'redirect_url host is not allowed', field: 'redirect_url' } };
+      if (priv) return { ok: false, err: { code: 'VALIDATION_ERROR', message: `${field} host is not allowed`, field } };
     }
   }
   // Re-cap normalized length after URL.toString() may have re-encoded.
   const normalized = u.toString();
   if (normalized.length > 500) {
-    return { ok: false, err: { code: 'VALIDATION_ERROR', message: 'redirect_url must be 500 characters or fewer', field: 'redirect_url' } };
+    return { ok: false, err: { code: 'VALIDATION_ERROR', message: `${field} must be 500 characters or fewer`, field } };
   }
   return { ok: true, value: normalized };
+}
+
+/** Browser redirect URL used after the order is verified as paid. */
+export function parseRedirectUrlShape(raw: unknown) {
+  return parseBrowserUrlShape(raw, 'redirect_url');
+}
+
+/** Browser redirect URL used when the order ends in failed/expired/cancelled. */
+export function parseCancelUrlShape(raw: unknown) {
+  return parseBrowserUrlShape(raw, 'cancel_url');
 }
 
 /** Full SSRF check including DNS resolution — call right before delivery. */

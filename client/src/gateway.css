@@ -1726,18 +1726,31 @@ code {
   position: relative;
   height: 4px;
   border-radius: 999px;
-  background: rgba(22, 163, 74, 0.14);
+  background: var(--pp-redir-accent-soft);
   overflow: hidden;
 }
 .pp-redirect-bar-fill {
   position: absolute; inset: 0;
-  background: linear-gradient(90deg, var(--pp-redir-accent), #22c55e);
+  /* Single-stop gradient keeps the bar in palette for both paid (green)
+     and cancel (red) variants without needing a second --var. */
+  background: linear-gradient(90deg, var(--pp-redir-accent), var(--pp-redir-accent));
   transform-origin: left center;
   animation: pp-redirect-bar-deplete var(--pp-redir-total) linear forwards;
 }
 @keyframes pp-redirect-bar-deplete {
   from { transform: scaleX(1); }
   to   { transform: scaleX(0); }
+}
+
+/* Cancel variant: same layout, red palette. The two custom props feed
+   the ring stroke, bar fill, check chip background, soft tints, and the
+   linear bar track — overriding them flips the entire surface to red
+   without duplicating any layout rules. */
+.pp-redirect.pp-redirect--cancel {
+  --pp-redir-accent: var(--gw-bad, #b91c1c);
+  --pp-redir-accent-soft: var(--gw-bad-bg, rgba(220, 38, 38, 0.08));
+  border-color: rgba(220, 38, 38, 0.22);
+  box-shadow: 0 1px 0 rgba(220, 38, 38, 0.06), 0 6px 16px -10px rgba(220, 38, 38, 0.35);
 }
 
 .pp-redirect-actions {

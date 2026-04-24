@@ -40,7 +40,7 @@ router.get('/transactions', gwSession, async (req: GwSessionRequest, res: Respon
   }
 
   const sql = `SELECT id, client_order_id, txn_ref, amount, currency, status, customer_reference,
-                      callback_url, redirect_url, callback_sent, callback_sent_at, callback_status, callback_attempts,
+                      callback_url, redirect_url, cancel_url, callback_sent, callback_sent_at, callback_status, callback_attempts,
                       gateway_txn_id, gateway_bank_txn_id, created_at, expires_at, verified_at
                FROM gw_orders
                WHERE ${where.join(' AND ')}

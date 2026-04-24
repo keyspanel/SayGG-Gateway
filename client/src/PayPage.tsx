@@ -19,20 +19,27 @@ interface PayOrder {
   is_expired: boolean;
   bank_rrn: string | null;
   redirect_url?: string | null;
+  cancel_url?: string | null;
 }
 
-/** Seconds the success page waits before redirecting to redirect_url. */
+/** Seconds the success / cancel page waits before redirecting. */
 const REDIRECT_COUNTDOWN_SECONDS = 5;
 
+/** Variants of the post-order redirect card. */
+type RedirectVariant = 'paid' | 'cancel';
+
 /**
- * Build the final browser redirect target for a verified-paid order.
+ * Build the final browser redirect target for a finalized order.
  * Preserves any existing query string on the merchant URL and adds the
  * payment result fields. Only public, non-sensitive parameters are appended:
  * never API tokens, merchant secrets, or Paytm keys.
+ *
+ * The status param mirrors order.status, so success URLs see status=paid
+ * and cancel URLs see status=failed | expired | cancelled.
  */
 export function buildRedirectUrl(rawUrl: string, order: PayOrder): string {
   const u = new URL(rawUrl);
-  u.searchParams.set('status', 'paid');
+  u.searchParams.set('status', order.status);
   u.searchParams.set('txn_ref', order.txn_ref);
   if (order.client_order_id) u.searchParams.set('client_order_id', order.client_order_id);
   u.searchParams.set('amount', order.amount.toFixed(2));
@@ -172,28 +179,77 @@ function SupportedApps() {
 }
 
 /**
- * Auto-redirect card shown after the backend confirms an order is paid AND a
- * valid redirect_url is present on the order. Counts down from
- * REDIRECT_COUNTDOWN_SECONDS, then navigates the customer to the merchant's
- * success page. The customer can cancel or jump immediately.
- *
- * Important: this component is only ever mounted when order.status === 'paid'.
- * The parent guards against rendering during pending/failed/expired/cancelled
- * states, so we never redirect on a non-paid status.
+ * Per-variant copy and primary-CTA labels for the post-order redirect card.
+ * Centralised here so the "paid" and "cancel" surfaces stay in lock-step
+ * and we never accidentally show success copy on a failed order.
  */
-function RedirectPanel({ order }: { order: PayOrder }) {
+const REDIRECT_COPY: Record<RedirectVariant, {
+  ariaLabel: string;
+  title: string;          // shown next to the countdown ring
+  subTo: string;          // "Redirecting to <host> in 5s"
+  subToBare: string;      // when host couldn't be derived
+  ctaLabel: string;       // primary CTA when countdown is live
+  ctaCancelled: string;   // primary CTA after user clicks "Stay on this page"
+  goingTitle: string;     // title shown while window.location.assign() is firing
+  cancelledTitle: string; // title shown after user pauses the auto-redirect
+  cancelledSub: (host: string) => React.ReactNode;
+}> = {
+  paid: {
+    ariaLabel: 'Redirecting to merchant after successful payment',
+    title: 'Payment successful',
+    subTo: 'Redirecting to',
+    subToBare: 'Redirecting to merchant',
+    ctaLabel: 'Redirect now',
+    ctaCancelled: 'Continue to merchant',
+    goingTitle: 'Taking you back…',
+    cancelledTitle: 'Auto-redirect cancelled',
+    cancelledSub: (host: string) => host
+      ? <>You can continue to <b>{host}</b> when you're ready.</>
+      : <>You can continue to the merchant when you're ready.</>,
+  },
+  cancel: {
+    ariaLabel: 'Returning to merchant after unsuccessful payment',
+    title: 'Payment not completed',
+    subTo: 'Returning to',
+    subToBare: 'Returning to merchant',
+    ctaLabel: 'Try again',
+    ctaCancelled: 'Return to merchant',
+    goingTitle: 'Taking you back…',
+    cancelledTitle: 'Auto-return paused',
+    cancelledSub: (host: string) => host
+      ? <>You can head back to <b>{host}</b> to retry when you're ready.</>
+      : <>You can head back to the merchant to retry when you're ready.</>,
+  },
+};
+
+/**
+ * Auto-redirect card shown when an order reaches a terminal state AND the
+ * matching merchant URL is present:
+ *   variant === 'paid'   → fires when status === 'paid' and redirect_url is set
+ *   variant === 'cancel' → fires when status ∈ {failed,expired,cancelled} and cancel_url is set
+ *
+ * Counts down from REDIRECT_COUNTDOWN_SECONDS, then navigates the customer
+ * to the merchant URL. The customer can jump immediately or pause the
+ * auto-redirect with "Stay on this page".
+ *
+ * The parent component is responsible for the status guard — RedirectPanel
+ * itself trusts whatever variant + URL it's handed and just runs the timer.
+ */
+function RedirectPanel({ order, variant, rawUrl }: { order: PayOrder; variant: RedirectVariant; rawUrl: string }) {
   const [remaining, setRemaining] = useState<number>(REDIRECT_COUNTDOWN_SECONDS);
   const [cancelled, setCancelled] = useState<boolean>(false);
   const [redirected, setRedirected] = useState<boolean>(false);
   const tickRef = useRef<number | undefined>(undefined);
   const goRef = useRef<number | undefined>(undefined);
 
+  const copy = REDIRECT_COPY[variant];
+
   // Compute the safe target URL once. If buildRedirectUrl throws (e.g. the
   // backend somehow stored a malformed URL), we render an inline fallback
   // message instead of redirecting anywhere.
   const targetUrl = (() => {
-    if (!order.redirect_url) return null;
-    try { return buildRedirectUrl(order.redirect_url, order); }
+    if (!rawUrl) return null;
+    try { return buildRedirectUrl(rawUrl, order); }
     catch { return null; }
   })();
 
@@ -230,9 +286,13 @@ function RedirectPanel({ order }: { order: PayOrder }) {
   let destHost = '';
   try { destHost = new URL(targetUrl).hostname.replace(/^www\./, ''); } catch { destHost = ''; }
 
+  // Variant marker is also used by CSS to flip the palette (green for
+  // success, red/warm for cancel) without duplicating any layout rules.
+  const variantClass = variant === 'paid' ? 'pp-redirect--paid' : 'pp-redirect--cancel';
+
   if (cancelled) {
     return (
-      <div className="pp-redirect pp-redirect--cancelled" role="group" aria-label="Auto-redirect cancelled">
+      <div className={`pp-redirect pp-redirect--cancelled ${variantClass}`} role="group" aria-label={copy.cancelledTitle}>
         <div className="pp-redirect-head">
           <div className="pp-redirect-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -241,17 +301,13 @@ function RedirectPanel({ order }: { order: PayOrder }) {
             </svg>
           </div>
           <div className="pp-redirect-text">
-            <div className="pp-redirect-title">Auto-redirect cancelled</div>
-            <div className="pp-redirect-sub">
-              {destHost
-                ? <>You can continue to <b>{destHost}</b> when you're ready.</>
-                : <>You can continue to the merchant when you're ready.</>}
-            </div>
+            <div className="pp-redirect-title">{copy.cancelledTitle}</div>
+            <div className="pp-redirect-sub">{copy.cancelledSub(destHost)}</div>
           </div>
         </div>
         <div className="pp-redirect-actions">
           <button type="button" className="pp-btn primary pp-redirect-cta" onClick={performRedirect}>
-            Continue to merchant
+            {copy.ctaCancelled}
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M5 12h14" /><path d="M13 5l7 7-7 7" />
             </svg>
@@ -263,11 +319,11 @@ function RedirectPanel({ order }: { order: PayOrder }) {
 
   if (redirected) {
     return (
-      <div className="pp-redirect pp-redirect--going" role="status" aria-live="polite">
+      <div className={`pp-redirect pp-redirect--going ${variantClass}`} role="status" aria-live="polite">
         <div className="pp-redirect-head">
           <div className="pp-redirect-spin" aria-hidden="true" />
           <div className="pp-redirect-text">
-            <div className="pp-redirect-title">Taking you back…</div>
+            <div className="pp-redirect-title">{copy.goingTitle}</div>
             <div className="pp-redirect-sub">
               {destHost ? <>Opening <b>{destHost}</b></> : <>Opening merchant page</>}
             </div>
@@ -282,9 +338,9 @@ function RedirectPanel({ order }: { order: PayOrder }) {
   // ring depletes smoothly while the digit ticks once per second.
   return (
     <div
-      className="pp-redirect pp-redirect--live"
+      className={`pp-redirect pp-redirect--live ${variantClass}`}
       role="group"
-      aria-label="Redirecting to merchant after successful payment"
+      aria-label={copy.ariaLabel}
       style={{ ['--pp-redir-total' as string]: `${REDIRECT_COUNTDOWN_SECONDS}s` }}
     >
       <div className="pp-redirect-head">
@@ -298,16 +354,23 @@ function RedirectPanel({ order }: { order: PayOrder }) {
         <div className="pp-redirect-text">
           <div className="pp-redirect-title">
             <span className="pp-redirect-check" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 12.5l4.5 4.5L19 7.5" />
-              </svg>
+              {variant === 'paid' ? (
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12.5l4.5 4.5L19 7.5" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                </svg>
+              )}
             </span>
-            Payment successful
+            {copy.title}
           </div>
           <div className="pp-redirect-sub">
             {destHost
-              ? <>Redirecting to <b>{destHost}</b> in {remaining}s</>
-              : <>Redirecting to merchant in {remaining}s</>}
+              ? <>{copy.subTo} <b>{destHost}</b> in {remaining}s</>
+              : <>{copy.subToBare} in {remaining}s</>}
           </div>
         </div>
       </div>
@@ -316,7 +379,7 @@ function RedirectPanel({ order }: { order: PayOrder }) {
       </div>
       <div className="pp-redirect-actions">
         <button type="button" className="pp-btn primary pp-redirect-cta" onClick={performRedirect}>
-          Redirect now
+          {copy.ctaLabel}
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M5 12h14" /><path d="M13 5l7 7-7 7" />
           </svg>
@@ -796,11 +859,17 @@ export default function PayPage() {
             <div><b>Amount</b><span>₹{order.amount.toFixed(2)}</span></div>
             {order.verified_at && <div><b>Confirmed</b><span>{new Date(order.verified_at).toLocaleString()}</span></div>}
           </div>
-          {/* Auto-redirect only when the backend has verified status === 'paid'
-              and a redirect_url is on the order. RedirectPanel itself unmounts
-              and clears its timers if the order changes away from paid. */}
+          {/* Auto-redirect after the backend confirms the order is terminal
+              and the matching merchant URL was set on create-order:
+                - paid              → redirect_url
+                - failed/expired/cancelled → cancel_url
+              RedirectPanel unmounts and clears its timers if the order ever
+              changes status, so we never redirect to the wrong destination. */}
           {order.status === 'paid' && order.redirect_url && (
-            <RedirectPanel order={order} />
+            <RedirectPanel order={order} variant="paid" rawUrl={order.redirect_url} />
+          )}
+          {(order.status === 'failed' || order.status === 'expired' || order.status === 'cancelled') && order.cancel_url && (
+            <RedirectPanel order={order} variant="cancel" rawUrl={order.cancel_url} />
           )}
         </div>
       )}

@@ -103,7 +103,8 @@ export default function GwDocs() {
     "currency": "INR",
     "client_order_id": "ORD-1001",
     "callback_url": "https://your-site.com/payment/webhook",
-    "redirect_url": "https://your-site.com/payment/success"
+    "redirect_url": "https://your-site.com/payment/success",
+    "cancel_url": "https://your-site.com/payment/cancelled"
   }'`;
 
   const checkCurl = `curl -X POST '${baseUrl}/check-order' \\
@@ -160,7 +161,8 @@ echo curl_exec($ch);`;
     "payment_page_url": "https://your-domain.com/pay/9k3mZpQ2vR8sT1xY4nL6Aw",
     "qr_image_url": "/api/pay/9k3mZpQ2vR8sT1xY4nL6Aw/qr.png",
     "expires_at": "2026-04-20T10:45:01.000Z",
-    "redirect_url": "https://your-site.com/payment/success"
+    "redirect_url": "https://your-site.com/payment/success",
+    "cancel_url": "https://your-site.com/payment/cancelled"
   }
 }`;
 
@@ -387,6 +389,7 @@ echo curl_exec($ch);`;
                   <tr><td>customer_reference</td><td>string</td><td>no</td><td>Internal customer ref</td></tr>
                   <tr><td>callback_url</td><td>string</td><td>no</td><td>HTTPS server webhook URL (POST, signed)</td></tr>
                   <tr><td>redirect_url</td><td>string</td><td>no</td><td>HTTPS browser redirect URL after status becomes <code>paid</code></td></tr>
+                  <tr><td>cancel_url</td><td>string</td><td>no</td><td>HTTPS browser redirect URL when status becomes <code>failed</code>, <code>expired</code>, or <code>cancelled</code></td></tr>
                   <tr><td>note</td><td>string</td><td>no</td><td>Shown in UPI app</td></tr>
                 </tbody>
               </table>
@@ -461,10 +464,13 @@ echo curl_exec($ch);`;
             Every <code>create-order</code> response includes a <code>payment_page_url</code>. Share it with the customer — we render the QR, handle status polling, and confirm the payment.
           </p>
           <p className="gw-muted">
-            If you also pass <code>redirect_url</code>, the hosted page automatically redirects the customer to that URL <strong>5 seconds after</strong> the order is verified as <code>paid</code>. The customer can press <em>Redirect now</em> or <em>Stay on this page</em>. We never redirect on <code>pending</code>, <code>failed</code>, <code>expired</code>, or <code>cancelled</code>.
+            If you also pass <code>redirect_url</code>, the hosted page automatically redirects the customer to that URL <strong>5 seconds after</strong> the order is verified as <code>paid</code>. The customer can press <em>Redirect now</em> or <em>Stay on this page</em>.
           </p>
           <p className="gw-muted" style={{ marginTop: -4 }}>
-            <code>callback_url</code> is the server-to-server webhook (POST, HMAC-signed) and is never exposed to the browser. <code>redirect_url</code> is only the browser landing page; safe public params are appended:
+            Pass <code>cancel_url</code> to handle the unhappy path: the hosted page shows a "Payment not completed" card and redirects there <strong>5 seconds after</strong> the order ends in <code>failed</code>, <code>expired</code>, or <code>cancelled</code>. The customer can press <em>Try again</em> or <em>Stay on this page</em>. We never redirect while the order is still <code>pending</code>.
+          </p>
+          <p className="gw-muted" style={{ marginTop: -4 }}>
+            <code>callback_url</code> is the server-to-server webhook (POST, HMAC-signed) and is never exposed to the browser. <code>redirect_url</code> and <code>cancel_url</code> are browser-only landing pages; safe public params are appended to both:
             {' '}<code>status</code>, <code>txn_ref</code>, <code>client_order_id</code>, <code>amount</code>, <code>currency</code>.
           </p>
 
@@ -477,6 +483,7 @@ echo curl_exec($ch);`;
                 <tr><td>payment_page_url</td><td>Hosted checkout URL</td></tr>
                 <tr><td>qr_image_url</td><td>PNG QR endpoint for self-rendering</td></tr>
                 <tr><td>redirect_url</td><td>Browser redirect target after <code>paid</code> (echoed back if you sent one)</td></tr>
+                <tr><td>cancel_url</td><td>Browser redirect target after <code>failed</code>, <code>expired</code>, or <code>cancelled</code> (echoed back if you sent one)</td></tr>
               </tbody>
             </table>
           </div>
@@ -567,6 +574,7 @@ function TestConsole({ apiToken, baseUrl }: { apiToken: string; baseUrl: string 
   const [customerRef, setCustomerRef] = useState('');
   const [callbackUrl, setCallbackUrl] = useState('');
   const [redirectUrl, setRedirectUrl] = useState('');
+  const [cancelUrl, setCancelUrl] = useState('');
   const [note, setNote] = useState('Sandbox order');
 
   const [createBusy, setCreateBusy] = useState(false);
@@ -587,6 +595,7 @@ function TestConsole({ apiToken, baseUrl }: { apiToken: string; baseUrl: string 
     if (customerRef.trim()) body.customer_reference = customerRef.trim();
     if (callbackUrl.trim()) body.callback_url = callbackUrl.trim();
     if (redirectUrl.trim()) body.redirect_url = redirectUrl.trim();
+    if (cancelUrl.trim()) body.cancel_url = cancelUrl.trim();
     if (note.trim()) body.note = note.trim();
     try {
       const r = await gwApiRaw('/create-order', apiToken, { method: 'POST', body });
@@ -663,6 +672,10 @@ function TestConsole({ apiToken, baseUrl }: { apiToken: string; baseUrl: string 
             <label className="gw-field">
               <span>redirect_url <small>optional · browser success redirect</small></span>
               <input value={redirectUrl} onChange={(e) => setRedirectUrl(e.target.value)} placeholder="https://your-site.com/payment/success" inputMode="url" autoCapitalize="off" />
+            </label>
+            <label className="gw-field">
+              <span>cancel_url <small>optional · browser cancel/failure redirect</small></span>
+              <input value={cancelUrl} onChange={(e) => setCancelUrl(e.target.value)} placeholder="https://your-site.com/payment/cancelled" inputMode="url" autoCapitalize="off" />
             </label>
             <label className="gw-field">
               <span>note <small>optional</small></span>

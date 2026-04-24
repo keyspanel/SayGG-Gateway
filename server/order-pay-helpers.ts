@@ -19,6 +19,7 @@ export interface OrderRow {
   verified_at: Date | null;
   callback_url: string | null;
   redirect_url: string | null;
+  cancel_url: string | null;
   callback_sent: boolean;
   gateway_txn_id: string | null;
   gateway_bank_txn_id: string | null;
@@ -74,10 +75,14 @@ export function shapeOrder(o: OrderRow, cfg: MerchantCfg | null) {
     is_terminal: ['paid', 'failed', 'expired', 'cancelled'].includes(o.status),
     is_expired: isOrderExpiredAt(o.expires_at),
     bank_rrn: o.gateway_bank_txn_id,
-    // Browser redirect target after a verified-paid status. Intentionally
-    // exposed on the public hosted-page snapshot so the React page can
-    // perform the post-payment redirect. callback_url stays server-only.
+    // Browser redirect targets after the order reaches a terminal state.
+    // Both are intentionally exposed on the public hosted-page snapshot so
+    // the React page can perform the post-payment redirect.
+    //   redirect_url → fired when status === 'paid'
+    //   cancel_url   → fired when status ∈ {failed, expired, cancelled}
+    // callback_url is the server webhook and stays server-only.
     redirect_url: o.redirect_url,
+    cancel_url: o.cancel_url,
   };
 }
 

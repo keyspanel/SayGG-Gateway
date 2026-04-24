@@ -13,6 +13,7 @@ import {
   parseNote,
   parseCallbackUrlShape,
   parseRedirectUrlShape,
+  parseCancelUrlShape,
   parseIdempotencyKey,
 } from './validation';
 import { rateLimit } from './rate-limit';
@@ -89,6 +90,7 @@ function shapeOrderForApi(o: any) {
     expires_at: o.expires_at,
     callback_url: o.callback_url || undefined,
     redirect_url: o.redirect_url || undefined,
+    cancel_url: o.cancel_url || undefined,
   };
 }
 
@@ -122,6 +124,9 @@ router.post('/create-order', gwApiToken, createOrderLimiter, async (req: GwApiRe
     const rdP = parseRedirectUrlShape(req.body.redirect_url);
     if (!rdP.ok) return apiError(res, 400, rdP.err.message, rdP.err.code, { field: rdP.err.field });
 
+    const cnP = parseCancelUrlShape(req.body.cancel_url);
+    if (!cnP.ok) return apiError(res, 400, cnP.err.message, cnP.err.code, { field: cnP.err.field });
+
     const idemRaw = (req.headers['idempotency-key'] as string | undefined) ?? req.body.idempotency_key;
     const idemP = parseIdempotencyKey(idemRaw);
     if (!idemP.ok) return apiError(res, 400, idemP.err.message, idemP.err.code, { field: idemP.err.field });
@@ -132,6 +137,7 @@ router.post('/create-order', gwApiToken, createOrderLimiter, async (req: GwApiRe
     const note = noteP.value;
     const callback_url = cbP.value;
     const redirect_url = rdP.value;
+    const cancel_url = cnP.value;
     const idempotencyKey = idemP.value;
 
     const cfg = await getCreds(user.id);
@@ -140,9 +146,10 @@ router.post('/create-order', gwApiToken, createOrderLimiter, async (req: GwApiRe
     }
 
     // ---- Idempotency: same key + same fingerprint = return existing order ----
-    // redirect_url is part of the fingerprint so reusing the same key with a
-    // different success-redirect target is treated as IDEMPOTENCY_CONFLICT.
-    const fingerprint = fingerprintRequest({ amount, currency, client_order_id, callback_url, redirect_url, customer_reference, note });
+    // redirect_url and cancel_url are part of the fingerprint so reusing the
+    // same key with a different post-payment redirect target is treated as
+    // IDEMPOTENCY_CONFLICT (avoids silently routing customers somewhere new).
+    const fingerprint = fingerprintRequest({ amount, currency, client_order_id, callback_url, redirect_url, cancel_url, customer_reference, note });
 
     if (idempotencyKey) {
       const existing = await pool.query(
@@ -196,14 +203,14 @@ router.post('/create-order', gwApiToken, createOrderLimiter, async (req: GwApiRe
       ins = await pool.query(
         `INSERT INTO gw_orders
            (user_id, client_order_id, txn_ref, amount, currency, status, note, customer_reference,
-            callback_url, redirect_url, upi_payload, payment_link, public_token, expires_at,
+            callback_url, redirect_url, cancel_url, upi_payload, payment_link, public_token, expires_at,
             idempotency_key, idempotency_fingerprint)
-         VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9,$10,$10,$11,
+         VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9,$10,$11,$11,$12,
                  NOW() + INTERVAL '${ORDER_TTL_MIN} minutes',
-                 $12,$13)
+                 $13,$14)
          RETURNING *`,
         [user.id, client_order_id, txnRef, amount.toFixed(2), currency, note, customer_reference,
-         callback_url, redirect_url, upiPayload, publicToken, idempotencyKey, idempotencyKey ? fingerprint : null],
+         callback_url, redirect_url, cancel_url, upiPayload, publicToken, idempotencyKey, idempotencyKey ? fingerprint : null],
       );
     } catch (e: any) {
       // Unique-violation race — another concurrent request inserted first.
@@ -236,7 +243,7 @@ router.post('/create-order', gwApiToken, createOrderLimiter, async (req: GwApiRe
       user_id: user.id,
       event: 'order.created',
       status_after: 'pending',
-      meta: { has_callback: !!callback_url, has_redirect: !!redirect_url, idempotent: !!idempotencyKey },
+      meta: { has_callback: !!callback_url, has_redirect: !!redirect_url, has_cancel: !!cancel_url, idempotent: !!idempotencyKey },
     }).catch(() => {});
 
     apiSuccess(res, 'Order created', {
