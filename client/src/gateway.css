@@ -1604,6 +1604,35 @@ code {
 
 .pp-result .pp-meta-row { margin-top: 4px; padding-top: 12px; border-top: 1px dashed var(--gw-border); }
 
+/* Post-paid auto-redirect block — sits inside .pp-result, matches pp-card vibe */
+.pp-redirect {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--gw-ok-bg);
+  border: 1px solid rgba(22, 163, 74, 0.22);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.pp-redirect-count {
+  font-size: 13px;
+  color: var(--gw-text);
+  line-height: 1.45;
+}
+.pp-redirect-count strong { color: var(--gw-ok); font-weight: 700; }
+.pp-redirect-count b {
+  display: inline-block; min-width: 16px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700; color: var(--gw-text);
+}
+.pp-redirect-note {
+  font-size: 12.5px;
+  color: var(--gw-text-mute);
+  line-height: 1.45;
+}
+.pp-redirect-actions {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+
 .pp-notfound { text-align: center; padding: 24px 20px; }
 .pp-notfound h2 { margin: 14px 0 6px; font-size: 17px; }
 .pp-notfound p { color: var(--gw-text-mute); font-size: 13.5px; margin: 4px 0; }

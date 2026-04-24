@@ -78,6 +78,11 @@ CREATE INDEX IF NOT EXISTS idx_gw_orders_callback_due
   ON gw_orders(callback_next_attempt_at)
   WHERE status='paid' AND callback_url IS NOT NULL AND callback_sent=FALSE;
 
+-- Browser redirect URL after the order is verified as paid (separate from
+-- the server-to-server callback_url webhook). Optional, validated at the
+-- application layer before insert.
+ALTER TABLE gw_orders ADD COLUMN IF NOT EXISTS redirect_url TEXT;
+
 -- Append-only audit log for order lifecycle visibility
 CREATE TABLE IF NOT EXISTS gw_order_events (
   id BIGSERIAL PRIMARY KEY,

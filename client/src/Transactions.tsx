@@ -95,6 +95,14 @@ export default function GwTransactions() {
                   Webhook {o.callback_sent ? `· ${o.callback_status || 'ok'}` : 'pending'}
                 </div>
               )}
+              {o.redirect_url && (
+                <div className="gw-txn-callback" title={o.redirect_url}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v7H3V3h7"/>
+                  </svg>
+                  Redirect on paid
+                </div>
+              )}
               {o.status === 'pending' && (
                 <button className="gw-btn-ghost sm" style={{ alignSelf: 'flex-start' }} disabled={refreshing === o.id} onClick={() => refresh(o.id)}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>

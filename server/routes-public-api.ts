@@ -12,6 +12,7 @@ import {
   parseCustomerReference,
   parseNote,
   parseCallbackUrlShape,
+  parseRedirectUrlShape,
   parseIdempotencyKey,
 } from './validation';
 import { rateLimit } from './rate-limit';
@@ -87,6 +88,7 @@ function shapeOrderForApi(o: any) {
     created_at: o.created_at,
     expires_at: o.expires_at,
     callback_url: o.callback_url || undefined,
+    redirect_url: o.redirect_url || undefined,
   };
 }
 
@@ -117,6 +119,9 @@ router.post('/create-order', gwApiToken, createOrderLimiter, async (req: GwApiRe
     const cbP = parseCallbackUrlShape(req.body.callback_url);
     if (!cbP.ok) return apiError(res, 400, cbP.err.message, cbP.err.code, { field: cbP.err.field });
 
+    const rdP = parseRedirectUrlShape(req.body.redirect_url);
+    if (!rdP.ok) return apiError(res, 400, rdP.err.message, rdP.err.code, { field: rdP.err.field });
+
     const idemRaw = (req.headers['idempotency-key'] as string | undefined) ?? req.body.idempotency_key;
     const idemP = parseIdempotencyKey(idemRaw);
     if (!idemP.ok) return apiError(res, 400, idemP.err.message, idemP.err.code, { field: idemP.err.field });
@@ -126,6 +131,7 @@ router.post('/create-order', gwApiToken, createOrderLimiter, async (req: GwApiRe
     const customer_reference = custP.value;
     const note = noteP.value;
     const callback_url = cbP.value;
+    const redirect_url = rdP.value;
     const idempotencyKey = idemP.value;
 
     const cfg = await getCreds(user.id);
@@ -134,7 +140,9 @@ router.post('/create-order', gwApiToken, createOrderLimiter, async (req: GwApiRe
     }
 
     // ---- Idempotency: same key + same fingerprint = return existing order ----
-    const fingerprint = fingerprintRequest({ amount, currency, client_order_id, callback_url, customer_reference, note });
+    // redirect_url is part of the fingerprint so reusing the same key with a
+    // different success-redirect target is treated as IDEMPOTENCY_CONFLICT.
+    const fingerprint = fingerprintRequest({ amount, currency, client_order_id, callback_url, redirect_url, customer_reference, note });
 
     if (idempotencyKey) {
       const existing = await pool.query(
@@ -188,14 +196,14 @@ router.post('/create-order', gwApiToken, createOrderLimiter, async (req: GwApiRe
       ins = await pool.query(
         `INSERT INTO gw_orders
            (user_id, client_order_id, txn_ref, amount, currency, status, note, customer_reference,
-            callback_url, upi_payload, payment_link, public_token, expires_at,
+            callback_url, redirect_url, upi_payload, payment_link, public_token, expires_at,
             idempotency_key, idempotency_fingerprint)
-         VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9,$9,$10,
+         VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9,$10,$10,$11,
                  NOW() + INTERVAL '${ORDER_TTL_MIN} minutes',
-                 $11,$12)
+                 $12,$13)
          RETURNING *`,
         [user.id, client_order_id, txnRef, amount.toFixed(2), currency, note, customer_reference,
-         callback_url, upiPayload, publicToken, idempotencyKey, idempotencyKey ? fingerprint : null],
+         callback_url, redirect_url, upiPayload, publicToken, idempotencyKey, idempotencyKey ? fingerprint : null],
       );
     } catch (e: any) {
       // Unique-violation race — another concurrent request inserted first.
@@ -228,7 +236,7 @@ router.post('/create-order', gwApiToken, createOrderLimiter, async (req: GwApiRe
       user_id: user.id,
       event: 'order.created',
       status_after: 'pending',
-      meta: { has_callback: !!callback_url, idempotent: !!idempotencyKey },
+      meta: { has_callback: !!callback_url, has_redirect: !!redirect_url, idempotent: !!idempotencyKey },
     }).catch(() => {});
 
     apiSuccess(res, 'Order created', {

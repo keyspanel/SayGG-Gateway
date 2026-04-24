@@ -18,6 +18,26 @@ interface PayOrder {
   is_terminal: boolean;
   is_expired: boolean;
   bank_rrn: string | null;
+  redirect_url?: string | null;
+}
+
+/** Seconds the success page waits before redirecting to redirect_url. */
+const REDIRECT_COUNTDOWN_SECONDS = 5;
+
+/**
+ * Build the final browser redirect target for a verified-paid order.
+ * Preserves any existing query string on the merchant URL and adds the
+ * payment result fields. Only public, non-sensitive parameters are appended:
+ * never API tokens, merchant secrets, or Paytm keys.
+ */
+export function buildRedirectUrl(rawUrl: string, order: PayOrder): string {
+  const u = new URL(rawUrl);
+  u.searchParams.set('status', 'paid');
+  u.searchParams.set('txn_ref', order.txn_ref);
+  if (order.client_order_id) u.searchParams.set('client_order_id', order.client_order_id);
+  u.searchParams.set('amount', order.amount.toFixed(2));
+  u.searchParams.set('currency', order.currency);
+  return u.toString();
 }
 
 type LiveState = 'connecting' | 'live' | 'reconnecting' | 'fallback' | 'closed';
@@ -146,6 +166,101 @@ function SupportedApps() {
         {UPI_APPS.map((_, i) => (
           <span key={i} className={`pp-apps-dot${i === idx ? ' on' : ''}`} />
         ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Auto-redirect card shown after the backend confirms an order is paid AND a
+ * valid redirect_url is present on the order. Counts down from
+ * REDIRECT_COUNTDOWN_SECONDS, then navigates the customer to the merchant's
+ * success page. The customer can cancel or jump immediately.
+ *
+ * Important: this component is only ever mounted when order.status === 'paid'.
+ * The parent guards against rendering during pending/failed/expired/cancelled
+ * states, so we never redirect on a non-paid status.
+ */
+function RedirectPanel({ order }: { order: PayOrder }) {
+  const [remaining, setRemaining] = useState<number>(REDIRECT_COUNTDOWN_SECONDS);
+  const [cancelled, setCancelled] = useState<boolean>(false);
+  const [redirected, setRedirected] = useState<boolean>(false);
+  const tickRef = useRef<number | undefined>(undefined);
+  const goRef = useRef<number | undefined>(undefined);
+
+  // Compute the safe target URL once. If buildRedirectUrl throws (e.g. the
+  // backend somehow stored a malformed URL), we render an inline fallback
+  // message instead of redirecting anywhere.
+  const targetUrl = (() => {
+    if (!order.redirect_url) return null;
+    try { return buildRedirectUrl(order.redirect_url, order); }
+    catch { return null; }
+  })();
+
+  const stopTimers = useCallback(() => {
+    if (tickRef.current !== undefined) { window.clearInterval(tickRef.current); tickRef.current = undefined; }
+    if (goRef.current !== undefined) { window.clearTimeout(goRef.current); goRef.current = undefined; }
+  }, []);
+
+  const performRedirect = useCallback(() => {
+    if (!targetUrl) return;
+    stopTimers();
+    setRedirected(true);
+    // Use assign so the merchant page becomes the next history entry; the
+    // customer can still use Back if they want to return.
+    window.location.assign(targetUrl);
+  }, [targetUrl, stopTimers]);
+
+  useEffect(() => {
+    if (!targetUrl || cancelled) { stopTimers(); return; }
+    setRemaining(REDIRECT_COUNTDOWN_SECONDS);
+    tickRef.current = window.setInterval(() => {
+      setRemaining((s) => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    goRef.current = window.setTimeout(() => {
+      performRedirect();
+    }, REDIRECT_COUNTDOWN_SECONDS * 1000);
+    return () => stopTimers();
+  }, [targetUrl, cancelled, performRedirect, stopTimers]);
+
+  if (!targetUrl) return null;
+
+  if (cancelled) {
+    return (
+      <div className="pp-redirect">
+        <div className="pp-redirect-note">
+          Auto redirect cancelled. You can close this page or continue manually.
+        </div>
+        <div className="pp-redirect-actions">
+          <button type="button" className="pp-btn primary" onClick={performRedirect}>
+            Continue to merchant
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (redirected) {
+    return (
+      <div className="pp-redirect">
+        <div className="pp-redirect-note">Redirecting…</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pp-redirect">
+      <div className="pp-redirect-count" aria-live="polite">
+        <strong>Payment successful.</strong>
+        <span> Redirecting in <b>{remaining}</b> {remaining === 1 ? 'second' : 'seconds'}…</span>
+      </div>
+      <div className="pp-redirect-actions">
+        <button type="button" className="pp-btn primary" onClick={performRedirect}>
+          Redirect now
+        </button>
+        <button type="button" className="pp-btn ghost" onClick={() => { stopTimers(); setCancelled(true); }}>
+          Stay on this page
+        </button>
       </div>
     </div>
   );
@@ -618,6 +733,12 @@ export default function PayPage() {
             <div><b>Amount</b><span>₹{order.amount.toFixed(2)}</span></div>
             {order.verified_at && <div><b>Confirmed</b><span>{new Date(order.verified_at).toLocaleString()}</span></div>}
           </div>
+          {/* Auto-redirect only when the backend has verified status === 'paid'
+              and a redirect_url is on the order. RedirectPanel itself unmounts
+              and clears its timers if the order changes away from paid. */}
+          {order.status === 'paid' && order.redirect_url && (
+            <RedirectPanel order={order} />
+          )}
         </div>
       )}
 
