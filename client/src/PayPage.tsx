@@ -456,6 +456,16 @@ export default function PayPage() {
   const orderRef = useRef<PayOrder | null>(null);
   orderRef.current = order;
 
+  // Long-press handling for the on-page QR. We treat both a quick tap and a
+  // sustained long-press the same way: trigger the rich PNG download. The
+  // native browser image menu (Open / Copy / Download / Share) is suppressed
+  // so the customer never sees the raw QR endpoint URL.
+  const lpTimerRef = useRef<number | undefined>(undefined);
+  const lpFiredRef = useRef<boolean>(false);
+  const lpStartXY = useRef<{ x: number; y: number } | null>(null);
+  const LP_MS = 450;        // how long the press must be held to count as long-press
+  const LP_MOVE_PX = 10;    // cancel long-press if the finger drifts more than this
+
   // Apply a snapshot, but never let a stale "pending" overwrite a confirmed terminal state.
   const applySnapshot = useCallback((next: PayOrder) => {
     setOrder((prev) => {
@@ -772,6 +782,56 @@ export default function PayPage() {
   const orderRefId = order.client_order_id || order.txn_ref;
   const isPending = order.status === 'pending';
 
+  // Cancel any pending long-press timer + reset gesture state.
+  const cancelLongPress = () => {
+    if (lpTimerRef.current !== undefined) {
+      window.clearTimeout(lpTimerRef.current);
+      lpTimerRef.current = undefined;
+    }
+    lpStartXY.current = null;
+  };
+
+  const handleQrPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Only react to primary pointer (left click / first finger / pen tip).
+    if (e.button !== undefined && e.button !== 0) return;
+    cancelLongPress();
+    lpFiredRef.current = false;
+    lpStartXY.current = { x: e.clientX, y: e.clientY };
+    lpTimerRef.current = window.setTimeout(() => {
+      lpFiredRef.current = true;
+      lpTimerRef.current = undefined;
+      // Fire the same rich download flow as the button.
+      void downloadQr();
+    }, LP_MS);
+  };
+
+  const handleQrPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const start = lpStartXY.current;
+    if (!start) return;
+    const dx = Math.abs(e.clientX - start.x);
+    const dy = Math.abs(e.clientY - start.y);
+    if (dx > LP_MOVE_PX || dy > LP_MOVE_PX) cancelLongPress();
+  };
+
+  const handleQrPointerEnd = () => cancelLongPress();
+
+  const handleQrClick = () => {
+    // If the long-press already fired, swallow the synthesized click so we
+    // don't trigger the download a second time.
+    if (lpFiredRef.current) {
+      lpFiredRef.current = false;
+      return;
+    }
+    void downloadQr();
+  };
+
+  const handleQrKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      void downloadQr();
+    }
+  };
+
   let liveLabel: string;
   let liveClass: string;
   if (checking) { liveLabel = 'Checking…'; liveClass = 'on'; }
@@ -817,14 +877,35 @@ export default function PayPage() {
 
       {isPending && (
         <div className="pp-card pp-qr-card">
-          <div className="pp-qr-wrap">
+          <div
+            className={`pp-qr-wrap${downloading ? ' is-busy' : ''}`}
+            role="button"
+            tabIndex={0}
+            aria-label={downloading ? 'Preparing QR download' : 'Tap or long-press to download payment QR'}
+            aria-busy={downloading || undefined}
+            title="Tap or long-press to download"
+            onClick={handleQrClick}
+            onKeyDown={handleQrKeyDown}
+            onPointerDown={handleQrPointerDown}
+            onPointerMove={handleQrPointerMove}
+            onPointerUp={handleQrPointerEnd}
+            onPointerCancel={handleQrPointerEnd}
+            onPointerLeave={handleQrPointerEnd}
+            onContextMenu={(e) => e.preventDefault()}
+          >
             <img
               className="pp-qr-img"
               src={`/api/pay/${order.public_token}/qr.png?size=520`}
               alt="UPI payment QR"
               width={240}
               height={240}
+              draggable={false}
+              onContextMenu={(e) => e.preventDefault()}
+              onDragStart={(e) => e.preventDefault()}
             />
+            <span className="pp-qr-hint" aria-hidden="true">
+              {downloading ? 'Preparing…' : 'Tap or long-press to save'}
+            </span>
           </div>
           <ol className="pp-steps">
             <li>Open any UPI app — GPay, PhonePe, Paytm, BHIM.</li>
