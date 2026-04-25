@@ -556,6 +556,96 @@ function RedirectPanel({ order, variant, rawUrl }: { order: PayOrder; variant: R
   );
 }
 
+/**
+ * CopyButton
+ *
+ * Small inline icon button that copies its `value` to the user's clipboard.
+ * Designed to sit next to short identifiers like Order ID, Note, and Ref on
+ * the hosted pay page.
+ *
+ * Mobile-friendly notes:
+ *  - Tap target is min 28×28 with no hover dependency.
+ *  - `data-allow-touch="1"` opts the button out of the page-wide
+ *    long-press / context-menu blockers in usePayPageAntiCopyProtection,
+ *    so a tap reliably triggers onClick instead of being preventDefault'd.
+ *  - The copy itself uses navigator.clipboard.writeText (which does NOT
+ *    fire a 'copy' event, so the global capture-phase 'copy' blocker does
+ *    not interfere). A textarea+execCommand fallback handles older WebViews.
+ *  - Briefly swaps to a checkmark + "Copied" tooltip so the user gets
+ *    feedback even without a separate toast.
+ */
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => () => {
+    if (timerRef.current !== undefined) window.clearTimeout(timerRef.current);
+  }, []);
+
+  const handleCopy = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!value) return;
+    let ok = false;
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(value);
+        ok = true;
+      }
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = value;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '0';
+        ta.style.left = '0';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, value.length);
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        ok = true;
+      } catch {
+        ok = false;
+      }
+    }
+    if (ok) {
+      setCopied(true);
+      if (timerRef.current !== undefined) window.clearTimeout(timerRef.current);
+      timerRef.current = window.setTimeout(() => setCopied(false), 1400);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      className={`pp-copy-btn${copied ? ' is-copied' : ''}`}
+      onClick={handleCopy}
+      aria-label={copied ? `${label} copied` : `Copy ${label}`}
+      title={copied ? 'Copied' : `Copy ${label}`}
+      data-allow-touch="1"
+    >
+      {copied ? (
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M5 12.5l4.5 4.5L19 7.5" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="9" y="9" width="11" height="11" rx="2" />
+          <path d="M5 15V6a2 2 0 0 1 2-2h9" />
+        </svg>
+      )}
+      <span className="pp-copy-btn-sr">{copied ? 'Copied' : 'Copy'}</span>
+    </button>
+  );
+}
+
 function StatusVisual({ order }: { order: PayOrder }) {
   if (order.status === 'paid') {
     return (
@@ -1199,8 +1289,22 @@ export default function PayPage() {
           <strong>₹{order.amount.toFixed(2)} <small>{order.currency}</small></strong>
         </div>
         <div className="pp-meta-row">
-          <div><b>Order</b><span>{orderRefId}</span></div>
-          {order.note && <div><b>Note</b><span>{order.note}</span></div>}
+          <div>
+            <b>Order</b>
+            <div className="pp-meta-val">
+              <span>{orderRefId}</span>
+              <CopyButton value={orderRefId} label="Order ID" />
+            </div>
+          </div>
+          {order.note && (
+            <div>
+              <b>Note</b>
+              <div className="pp-meta-val">
+                <span>{order.note}</span>
+                <CopyButton value={order.note} label="Note" />
+              </div>
+            </div>
+          )}
           {showCountdown && (
             <div><b>Expires in</b><span className="pp-countdown">{formatTimeLeft(expiresMs)}</span></div>
           )}
@@ -1267,7 +1371,13 @@ export default function PayPage() {
         <div className="pp-card pp-result">
           <StatusVisual order={order} />
           <div className="pp-meta-row">
-            <div><b>Order</b><span>{orderRefId}</span></div>
+            <div>
+              <b>Order</b>
+              <div className="pp-meta-val">
+                <span>{orderRefId}</span>
+                <CopyButton value={orderRefId} label="Order ID" />
+              </div>
+            </div>
             <div><b>Amount</b><span>₹{order.amount.toFixed(2)}</span></div>
             {order.verified_at && <div><b>Confirmed</b><span>{new Date(order.verified_at).toLocaleString()}</span></div>}
           </div>
@@ -1288,7 +1398,10 @@ export default function PayPage() {
 
       <footer className="pp-foot">
         <span>Secured by <strong>PayGateway</strong></span>
-        <span>Ref <code>{order.txn_ref}</code></span>
+        <span className="pp-foot-ref">
+          Ref <code>{order.txn_ref}</code>
+          <CopyButton value={order.txn_ref} label="Reference" />
+        </span>
       </footer>
     </div>
   );

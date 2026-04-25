@@ -1436,6 +1436,73 @@ code {
   word-break: break-word;
   font-feature-settings: "tnum" 1;
 }
+/* Inline value + copy-button row inside a meta cell.
+   The value can wrap if long; the copy button is a fixed-size pill anchored
+   at the start of the wrap so it never gets pushed off-screen on mobile. */
+.pp-meta-val {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.pp-meta-val > span {
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* Small icon-only button used next to Order ID, Note, Reference, etc.
+   Sized for comfortable mobile tapping (28×28 hit area) while looking like
+   a subtle secondary affordance. Uses currentColor so it inherits palette. */
+.pp-copy-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  margin: 0;
+  border-radius: 7px;
+  border: 1px solid var(--gw-border);
+  background: var(--gw-bg-2, #f5f6fa);
+  color: var(--gw-text-mute);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
+  user-select: none;
+}
+.pp-copy-btn:hover { color: var(--gw-accent); border-color: var(--gw-accent); }
+.pp-copy-btn:active { transform: scale(0.94); }
+.pp-copy-btn:focus-visible {
+  outline: none;
+  border-color: var(--gw-accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}
+.pp-copy-btn.is-copied {
+  color: #fff;
+  background: var(--gw-success, #16a34a);
+  border-color: var(--gw-success, #16a34a);
+}
+/* Visually-hidden label so screen readers always have a meaningful name
+   even when the icon is the only visible content. */
+.pp-copy-btn-sr {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0);
+  white-space: nowrap; border: 0;
+}
+
+/* Footer "Ref ABC123" line with its own copy button. */
+.pp-foot-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .pp-countdown {
   font-weight: 700;
   font-feature-settings: "tnum" 1;
