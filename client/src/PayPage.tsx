@@ -616,10 +616,6 @@ export default function PayPage() {
   const [downloading, setDownloading] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [shareMsg, setShareMsg] = useState<string | null>(null);
-  /** Resolution for the plain HD QR PNG download. 2K is a good default
-   *  that scans cleanly from print and screen and is small enough to
-   *  share on chat apps. */
-  const [downloadSize, setDownloadSize] = useState<1080 | 2048 | 4096>(2048);
   const [live, setLive] = useState<LiveState>('connecting');
 
   const startedAtRef = useRef<number>(Date.now());
@@ -818,15 +814,25 @@ export default function PayPage() {
   const showCountdown = order.status === 'pending' && order.expires_at && expiresMs > 0;
 
   /**
-   * Render the branded QR card to a canvas and return it as a PNG Blob.
-   * Used by both the Download and Share flows.
+   * Render the branded QR receipt card to a canvas and return it as a PNG
+   * Blob. Used by both Download and Share.
+   *
+   * The card is laid out in a 1080×1620 logical coordinate space, but the
+   * canvas backing store is multiplied by SCALE so the resulting PNG is
+   * 4× larger (4320×6480 — well above 4K). All text, strokes, and the
+   * embedded QR are rendered natively at that resolution, so fonts stay
+   * razor-sharp instead of blurring like a CSS upscale would.
+   *
+   * Bold weights are bumped a notch (700→800, 600→700, etc.) so headings
+   * read crisply when the image is viewed at small sizes in chat apps.
    */
   const buildQrCardBlob = async (): Promise<{ blob: Blob; orderRefLabel: string }> => {
     if (!order) throw new Error('order missing');
 
-    // Embed a high-resolution QR (1080) in the branded share card so it
-    // stays sharp when downsized by chat apps.
-    const qrRes = await fetch(`/api/pay/${order.public_token}/qr.png?size=1080`);
+    // Embed a true 4K QR — at 4× scale the QR region (720 logical px) maps
+    // to 2880 device px, so a 4096-source decodes to crisp pixels with no
+    // upscaling artifacts.
+    const qrRes = await fetch(`/api/pay/${order.public_token}/qr.png?size=4096`);
     const qrBlob = await qrRes.blob();
     const qrUrl = URL.createObjectURL(qrBlob);
     try {
@@ -839,53 +845,67 @@ export default function PayPage() {
 
       const W = 1080;
       const H = 1620;
+      const SCALE = 4; // → 4320 × 6480 PNG
       const canvas = document.createElement('canvas');
-      canvas.width = W;
-      canvas.height = H;
+      canvas.width = W * SCALE;
+      canvas.height = H * SCALE;
       const ctx = canvas.getContext('2d')!;
+      ctx.scale(SCALE, SCALE);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      // Better text rendering hints when supported.
+      (ctx as any).textRendering = 'geometricPrecision';
 
+      const FONT_STACK = '"Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+
+      // Background
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, W, H);
 
+      // Header band
       ctx.fillStyle = '#0a0a0f';
       ctx.fillRect(0, 0, W, 180);
 
+      // Brand mark
       ctx.fillStyle = '#ffffff';
-      ctx.font = '600 36px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.font = `800 40px ${FONT_STACK}`;
       ctx.textBaseline = 'middle';
       ctx.fillText('PG', 64, 90);
-      ctx.font = '500 28px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.font = `600 28px ${FONT_STACK}`;
       ctx.fillStyle = '#cfd2dc';
-      ctx.fillText('PayGateway · Secure UPI', 130, 90);
+      ctx.fillText('PayGateway · Secure UPI', 134, 90);
 
+      // Merchant name
       ctx.fillStyle = '#0a0a0f';
       ctx.textBaseline = 'top';
-      ctx.font = '700 56px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
-      ctx.fillText(order.payee_name || 'Merchant', 64, 230);
+      ctx.font = `800 60px ${FONT_STACK}`;
+      ctx.fillText(order.payee_name || 'Merchant', 64, 226);
 
+      // Subtitle
       ctx.fillStyle = '#5b6172';
-      ctx.font = '500 30px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
-      ctx.fillText('Scan to pay with any UPI app', 64, 308);
+      ctx.font = `600 30px ${FONT_STACK}`;
+      ctx.fillText('Scan to pay with any UPI app', 64, 310);
 
+      // Amount
       ctx.fillStyle = '#0a0a0f';
-      ctx.font = '800 92px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
-      ctx.fillText(`₹${order.amount.toFixed(2)}`, 64, 372);
+      ctx.font = `900 96px ${FONT_STACK}`;
+      ctx.fillText(`₹${order.amount.toFixed(2)}`, 64, 370);
       ctx.fillStyle = '#5b6172';
-      ctx.font = '500 28px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
-      ctx.fillText(order.currency || 'INR', 64, 482);
+      ctx.font = `600 28px ${FONT_STACK}`;
+      ctx.fillText(order.currency || 'INR', 64, 484);
 
+      // QR plate
       const qrSize = 720;
       const qrX = (W - qrSize) / 2;
       const qrY = 560;
       ctx.fillStyle = '#eef0f5';
-      ctx.fillRect(qrX - 16, qrY - 16, qrSize + 32, qrSize + 32);
+      ctx.fillRect(qrX - 18, qrY - 18, qrSize + 36, qrSize + 36);
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(qrX, qrY, qrSize, qrSize);
       ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
 
+      // Detail rows
       const detailY = qrY + qrSize + 60;
-      ctx.fillStyle = '#0a0a0f';
-      ctx.font = '600 30px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
       const orderRefLabel = order.client_order_id || order.txn_ref;
       const lines: Array<[string, string]> = [['Order', orderRefLabel]];
       if (order.note) lines.push(['Note', order.note]);
@@ -898,20 +918,21 @@ export default function PayPage() {
       let ly = detailY;
       for (const [label, value] of lines) {
         ctx.fillStyle = '#8b91a3';
-        ctx.font = '500 26px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+        ctx.font = `600 26px ${FONT_STACK}`;
         ctx.fillText(label, 64, ly);
         ctx.fillStyle = '#0a0a0f';
-        ctx.font = '600 30px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+        ctx.font = `700 30px ${FONT_STACK}`;
         const maxChars = 38;
         const v = value.length > maxChars ? value.slice(0, maxChars - 1) + '…' : value;
         ctx.fillText(v, 240, ly - 2);
-        ly += 56;
+        ly += 58;
       }
 
+      // Footer band
       ctx.fillStyle = '#eef0f5';
       ctx.fillRect(0, H - 80, W, 80);
       ctx.fillStyle = '#5b6172';
-      ctx.font = '500 24px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.font = `600 24px ${FONT_STACK}`;
       ctx.textBaseline = 'middle';
       ctx.fillText('Secured by PayGateway', 64, H - 40);
       ctx.textAlign = 'right';
@@ -928,24 +949,20 @@ export default function PayPage() {
   };
 
   /**
-   * Download a plain high-resolution QR PNG (black on white, generous quiet
-   * zone, error-correction level H) from the public endpoint. Defaults to
-   * 2K. The endpoint sets Content-Disposition so the browser saves it with
-   * a clean filename without us building a synthetic anchor.
+   * Download the branded QR receipt card as a 4K PNG. The card includes
+   * the merchant name, amount, scan instruction, embedded QR, and order
+   * details (order ID, note, expiry, reference) — everything the customer
+   * needs to recognise and pay.
    */
-  const downloadQr = async (sizeOverride?: 1080 | 2048 | 4096) => {
+  const downloadQr = async () => {
     if (!order || downloading) return;
-    const size = sizeOverride ?? downloadSize;
     setDownloading(true);
     try {
-      const res = await fetch(`/api/pay/${order.public_token}/qr.png?size=${size}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
+      const { blob, orderRefLabel } = await buildQrCardBlob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      const refLabel = order.client_order_id || order.txn_ref;
-      a.download = `PayGateway-QR-${refLabel}-${size}.png`;
+      a.download = `PayGateway-QR-${orderRefLabel}.png`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -1152,9 +1169,7 @@ export default function PayPage() {
               onClick={() => void downloadQr()}
               disabled={downloading}
             >
-              {downloading
-                ? 'Preparing…'
-                : `Download HD QR Code · ${downloadSize === 4096 ? '4K' : downloadSize === 2048 ? '2K' : '1080p'}`}
+              {downloading ? 'Preparing…' : 'Download QR Code'}
             </button>
             <button
               type="button"
@@ -1166,22 +1181,6 @@ export default function PayPage() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6 }}><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
               {sharing ? 'Opening…' : 'Share QR'}
             </button>
-          </div>
-          <div className="pp-size-row" role="radiogroup" aria-label="Download QR resolution">
-            <span className="pp-size-label">Resolution:</span>
-            {([1080, 2048, 4096] as const).map((sz) => (
-              <button
-                key={sz}
-                type="button"
-                role="radio"
-                aria-checked={downloadSize === sz}
-                className={`pp-size-pill${downloadSize === sz ? ' is-active' : ''}`}
-                onClick={() => setDownloadSize(sz)}
-                disabled={downloading}
-              >
-                {sz === 4096 ? '4K' : sz === 2048 ? '2K' : '1080p'}
-              </button>
-            ))}
           </div>
           {shareMsg && <div className="pp-share-toast" role="status">{shareMsg}</div>}
           <div className="pp-poll-row">

@@ -1664,42 +1664,6 @@ code {
   animation: gw-fade-in 0.2s ease-out;
 }
 
-.pp-size-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-  font-size: 12px;
-}
-.pp-size-label {
-  color: var(--gw-text-mute);
-  font-weight: 500;
-  margin-right: 2px;
-}
-.pp-size-pill {
-  appearance: none;
-  border: 1px solid var(--gw-border);
-  background: var(--gw-surface);
-  color: var(--gw-text-soft);
-  border-radius: 999px;
-  padding: 4px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
-}
-.pp-size-pill:hover:not(:disabled) {
-  background: var(--gw-surface-hover);
-  color: var(--gw-text);
-}
-.pp-size-pill.is-active {
-  background: var(--gw-text);
-  color: var(--gw-bg);
-  border-color: var(--gw-text);
-}
-.pp-size-pill:disabled { opacity: 0.5; cursor: not-allowed; }
-
 .pp-poll-row {
   display: flex; align-items: center; gap: 8px;
   font-size: 12px; color: var(--gw-text-mute);
