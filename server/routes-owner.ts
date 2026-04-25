@@ -17,39 +17,136 @@ const METHOD_ACCESS = new Set(['server', 'hosted', 'master']);
 /* Overview                                                                    */
 /* -------------------------------------------------------------------------- */
 
+async function safeQuery<T>(sql: string, fallback: T, label: string, params: any[] = []): Promise<T> {
+  try {
+    const r = await pool.query(sql, params);
+    return (r.rows[0] ?? fallback) as T;
+  } catch (e) {
+    console.error(`[owner overview] query failed (${label}):`, (e as Error).message);
+    return fallback;
+  }
+}
+async function safeRows<T>(sql: string, fallback: T[], label: string, params: any[] = []): Promise<T[]> {
+  try {
+    const r = await pool.query(sql, params);
+    return (r.rows ?? fallback) as T[];
+  } catch (e) {
+    console.error(`[owner overview] query failed (${label}):`, (e as Error).message);
+    return fallback;
+  }
+}
+
 router.get('/overview', async (_req, res: Response) => {
-  const [users, subs, plans, plat, orders] = await Promise.all([
-    pool.query(`SELECT
-                  COUNT(*)::int AS total,
-                  COUNT(*) FILTER (WHERE role='owner')::int AS owners,
-                  COUNT(*) FILTER (WHERE is_active=TRUE)::int AS active`),
-    pool.query(`SELECT COUNT(*)::int AS active
-                  FROM gw_user_subscriptions
-                 WHERE status='active' AND (expires_at IS NULL OR expires_at > NOW())`),
-    pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE is_active=TRUE)::int AS active FROM gw_plans`),
-    pool.query(`SELECT
-                  COUNT(*)::int AS total,
-                  COUNT(*) FILTER (WHERE status='paid')::int AS paid,
-                  COALESCE(SUM(amount) FILTER (WHERE status='paid'),0)::float AS revenue
-                  FROM gw_subscription_orders`),
-    pool.query(`SELECT COUNT(*)::int AS total FROM gw_orders`),
-  ]);
-  const u = await pool.query('SELECT id, username, email, role, is_active, created_at FROM gw_users ORDER BY id DESC LIMIT 5');
-  const o = await pool.query(`SELECT s.id, s.txn_ref, s.amount, s.status, s.created_at, s.user_id, u.username, p.name AS plan_name, p.plan_key
-                                FROM gw_subscription_orders s
-                                JOIN gw_users u ON u.id=s.user_id
-                                JOIN gw_plans p ON p.id=s.plan_id
-                               ORDER BY s.id DESC LIMIT 5`);
-  apiSuccess(res, 'Owner overview loaded', {
-    users: users.rows[0],
-    plans: plans.rows[0],
-    active_subscriptions: subs.rows[0].active,
-    plan_orders: orders.rows[0],
-    merchant_orders_total: orders.rows[0].total,
-    platform_payment_configured: isPlatformConfigured(plat.rows[0] || null) ? true : !!(plat.rows[0]?.is_active),
-    recent_users: u.rows,
-    recent_plan_orders: o.rows,
-  });
+  try {
+    const usersDefault  = { total: 0, owners: 0, active: 0 };
+    const plansDefault  = { total: 0, active: 0 };
+    const subsDefault   = { active: 0, expired: 0 };
+    const ordersDefault = {
+      total: 0, paid: 0, pending: 0,
+      revenue: 0, today_revenue: 0, month_revenue: 0,
+    };
+
+    const [users, subs, plans, ordersAgg, merchantTotalRow, platRow, recentUsers, recentOrders] =
+      await Promise.all([
+        safeQuery(
+          `SELECT
+             COUNT(*)::int                                            AS total,
+             COUNT(*) FILTER (WHERE role='owner')::int                AS owners,
+             COUNT(*) FILTER (WHERE COALESCE(is_active,TRUE))::int    AS active
+           FROM gw_users`,
+          usersDefault, 'users',
+        ),
+        safeQuery(
+          `SELECT
+             COUNT(*) FILTER (
+               WHERE status='active' AND (expires_at IS NULL OR expires_at > NOW())
+             )::int AS active,
+             COUNT(*) FILTER (
+               WHERE status='expired'
+                  OR (status='active' AND expires_at IS NOT NULL AND expires_at <= NOW())
+             )::int AS expired
+           FROM gw_user_subscriptions`,
+          subsDefault, 'subscriptions',
+        ),
+        safeQuery(
+          `SELECT
+             COUNT(*)::int                                       AS total,
+             COUNT(*) FILTER (WHERE is_active=TRUE)::int         AS active
+           FROM gw_plans`,
+          plansDefault, 'plans',
+        ),
+        safeQuery(
+          `SELECT
+             COUNT(*)::int                                                                AS total,
+             COUNT(*) FILTER (WHERE status='paid')::int                                   AS paid,
+             COUNT(*) FILTER (WHERE status='pending')::int                                AS pending,
+             COALESCE(SUM(amount) FILTER (WHERE status='paid'),0)::float                  AS revenue,
+             COALESCE(SUM(amount) FILTER (
+               WHERE status='paid' AND paid_at >= date_trunc('day', NOW())
+             ),0)::float                                                                  AS today_revenue,
+             COALESCE(SUM(amount) FILTER (
+               WHERE status='paid' AND paid_at >= date_trunc('month', NOW())
+             ),0)::float                                                                  AS month_revenue
+           FROM gw_subscription_orders`,
+          ordersDefault, 'plan_orders',
+        ),
+        safeQuery<{ total: number }>(
+          `SELECT COUNT(*)::int AS total FROM gw_orders`,
+          { total: 0 }, 'merchant_orders',
+        ),
+        safeQuery<{ id: number; is_active: boolean | null; paytm_upi_id: string | null; paytm_merchant_id: string | null; paytm_merchant_key: string | null; paytm_env: string | null; payee_name: string | null } | { id: 0; is_active: null; paytm_upi_id: null; paytm_merchant_id: null; paytm_merchant_key: null; paytm_env: null; payee_name: null }>(
+          `SELECT id, is_active, paytm_upi_id, paytm_merchant_id, paytm_merchant_key, paytm_env, payee_name
+             FROM gw_platform_settings ORDER BY id ASC LIMIT 1`,
+          { id: 0, is_active: null, paytm_upi_id: null, paytm_merchant_id: null, paytm_merchant_key: null, paytm_env: null, payee_name: null },
+          'platform_settings',
+        ),
+        safeRows(
+          `SELECT id, username, email, role, is_active, created_at
+             FROM gw_users ORDER BY id DESC LIMIT 5`,
+          [], 'recent_users',
+        ),
+        safeRows(
+          `SELECT s.id, s.txn_ref, s.amount, s.status, s.created_at, s.user_id,
+                  u.username, p.name AS plan_name, p.plan_key
+             FROM gw_subscription_orders s
+             JOIN gw_users u ON u.id = s.user_id
+             JOIN gw_plans p ON p.id = s.plan_id
+            ORDER BY s.id DESC LIMIT 5`,
+          [], 'recent_plan_orders',
+        ),
+      ]);
+
+    const platformConfigured = !!(
+      platRow && platRow.id && platRow.paytm_upi_id && platRow.paytm_merchant_id && platRow.paytm_merchant_key
+    );
+
+    apiSuccess(res, 'Owner overview loaded', {
+      // Object-shaped (current frontend uses these)
+      users,
+      plans,
+      plan_orders: ordersAgg,
+      active_subscriptions: subs.active,
+      expired_subscriptions: subs.expired,
+      merchant_orders_total: merchantTotalRow.total,
+      platform_payment_configured: platformConfigured,
+      recent_users: recentUsers,
+      recent_plan_orders: recentOrders,
+
+      // Flat-shaped mirror (matches the documented owner overview spec)
+      total_users:           users.total,
+      active_users:          users.active,
+      total_plans:           plans.total,
+      active_plans:          plans.active,
+      pending_plan_orders:   ordersAgg.pending,
+      paid_plan_orders:      ordersAgg.paid,
+      today_revenue:         ordersAgg.today_revenue,
+      month_revenue:         ordersAgg.month_revenue,
+      total_revenue:         ordersAgg.revenue,
+    });
+  } catch (err) {
+    console.error('[owner overview] failed', err);
+    return apiError(res, 500, 'Unable to load owner overview.', 'OWNER_OVERVIEW_FAILED');
+  }
 });
 
 /* -------------------------------------------------------------------------- */

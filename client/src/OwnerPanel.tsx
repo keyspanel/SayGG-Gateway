@@ -37,23 +37,73 @@ export default function OwnerPanel() {
 
 /* ---------------------------------------------------------------- Overview */
 
+const DEFAULT_OVERVIEW: any = {
+  users: { total: 0, owners: 0, active: 0 },
+  plans: { total: 0, active: 0 },
+  plan_orders: { total: 0, paid: 0, pending: 0, revenue: 0, today_revenue: 0, month_revenue: 0 },
+  active_subscriptions: 0,
+  expired_subscriptions: 0,
+  merchant_orders_total: 0,
+  platform_payment_configured: false,
+  recent_users: [],
+  recent_plan_orders: [],
+};
+
+function num(v: any): number {
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export function OwnerOverview() {
   const [d, setD] = useState<any>(null);
   const [err, setErr] = useState('');
-  useEffect(() => { apiGet('/api/owner/overview').then(setD).catch((e) => setErr(e.message)); }, []);
-  if (err) return <div className="gw-alert error"><span>{err}</span></div>;
+  const [loading, setLoading] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    setErr('');
+    apiGet('/api/owner/overview')
+      .then((data) => setD({ ...DEFAULT_OVERVIEW, ...(data || {}) }))
+      .catch((e: any) => setErr(e?.message || 'Unable to load owner overview.'))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  if (err) {
+    return (
+      <div className="gw-card">
+        <div className="gw-alert error" style={{ marginBottom: 12 }}>
+          <span>{err}</span>
+        </div>
+        <p className="gw-muted">We couldn't load the overview. Try again, or check the server logs for more details.</p>
+        <div className="gw-actions">
+          <button className="gw-btn-primary" onClick={load} disabled={loading}>
+            {loading ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      </div>
+    );
+  }
   if (!d) return <div className="gw-loading">Loading…</div>;
+
+  const overview = d ?? DEFAULT_OVERVIEW;
+  const users = overview.users ?? DEFAULT_OVERVIEW.users;
+  const plans = overview.plans ?? DEFAULT_OVERVIEW.plans;
+  const planOrders = overview.plan_orders ?? DEFAULT_OVERVIEW.plan_orders;
+  const recentUsers: any[] = Array.isArray(overview.recent_users) ? overview.recent_users : [];
+  const recentOrders: any[] = Array.isArray(overview.recent_plan_orders) ? overview.recent_plan_orders : [];
+
   return (
     <>
       <div className="gw-stats">
-        <Stat label="Users" value={d.users.total} />
-        <Stat label="Active subs" value={d.active_subscriptions} accent="ok" />
-        <Stat label="Plans (active)" value={`${d.plans.active}/${d.plans.total}`} />
-        <Stat label="Plan orders paid" value={d.plan_orders.paid} accent="ok" />
-        <Stat label="Plan revenue" value={`₹${(d.plan_orders.revenue || 0).toFixed(2)}`} wide />
+        <Stat label="Users" value={num(users.total)} />
+        <Stat label="Active subs" value={num(overview.active_subscriptions)} accent="ok" />
+        <Stat label="Plans (active)" value={`${num(plans.active)}/${num(plans.total)}`} />
+        <Stat label="Plan orders paid" value={num(planOrders.paid)} accent="ok" />
+        <Stat label="Plan revenue" value={`₹${num(planOrders.revenue).toFixed(2)}`} wide />
       </div>
 
-      {!d.platform_payment_configured && (
+      {!overview.platform_payment_configured && (
         <div className="gw-alert warn">
           <span>Platform UPI is not configured yet — users cannot purchase plans. <NavLink to="/gateway/owner/platform-settings">Configure now</NavLink></span>
         </div>
@@ -64,12 +114,13 @@ export function OwnerOverview() {
           <div className="gw-card-h"><h3>Recent users</h3><NavLink to="/gateway/owner/users">All</NavLink></div>
           <div className="gw-table">
             <div className="gw-tr head"><span>User</span><span>Email</span><span>Role</span><span>Created</span></div>
-            {d.recent_users.map((u: any) => (
+            {recentUsers.length === 0 && <div className="gw-tr"><span className="gw-muted">No users yet.</span></div>}
+            {recentUsers.map((u: any) => (
               <div className="gw-tr" key={u.id}>
                 <span data-label="User">{u.username}</span>
                 <span data-label="Email" className="gw-muted">{u.email}</span>
-                <span data-label="Role"><span className={`gw-badge ${u.role === 'owner' ? 'ok' : 'mute'}`}>{u.role}</span></span>
-                <span data-label="Created" className="gw-muted" style={{ fontSize: 12 }}>{new Date(u.created_at).toLocaleString()}</span>
+                <span data-label="Role"><span className={`gw-badge ${u.role === 'owner' ? 'ok' : 'mute'}`}>{u.role || 'user'}</span></span>
+                <span data-label="Created" className="gw-muted" style={{ fontSize: 12 }}>{u.created_at ? new Date(u.created_at).toLocaleString() : '—'}</span>
               </div>
             ))}
           </div>
@@ -78,12 +129,13 @@ export function OwnerOverview() {
           <div className="gw-card-h"><h3>Recent plan orders</h3><NavLink to="/gateway/owner/plan-orders">All</NavLink></div>
           <div className="gw-table">
             <div className="gw-tr head"><span>User</span><span>Plan</span><span>Amount</span><span>Status</span></div>
-            {d.recent_plan_orders.map((o: any) => (
+            {recentOrders.length === 0 && <div className="gw-tr"><span className="gw-muted">No plan orders yet.</span></div>}
+            {recentOrders.map((o: any) => (
               <div className="gw-tr" key={o.id}>
-                <span data-label="User">{o.username}</span>
-                <span data-label="Plan">{o.plan_name}</span>
-                <span data-label="Amount">₹{parseFloat(o.amount).toFixed(2)}</span>
-                <span data-label="Status"><span className={`gw-badge ${badgeFor(o.status)}`}>{o.status}</span></span>
+                <span data-label="User">{o.username || '—'}</span>
+                <span data-label="Plan">{o.plan_name || o.plan_key || '—'}</span>
+                <span data-label="Amount">₹{num(o.amount).toFixed(2)}</span>
+                <span data-label="Status"><span className={`gw-badge ${badgeFor(o.status)}`}>{o.status || '—'}</span></span>
               </div>
             ))}
           </div>
