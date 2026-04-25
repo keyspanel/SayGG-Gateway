@@ -614,6 +614,8 @@ export default function PayPage() {
   const [now, setNow] = useState<number>(Date.now());
   const [checking, setChecking] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [shareMsg, setShareMsg] = useState<string | null>(null);
   const [live, setLive] = useState<LiveState>('connecting');
 
   const startedAtRef = useRef<number>(Date.now());
@@ -812,18 +814,16 @@ export default function PayPage() {
   const showCountdown = order.status === 'pending' && order.expires_at && expiresMs > 0;
 
   /**
-   * Render a professional QR card to a canvas and trigger a PNG download.
-   * The card embeds the QR served at /api/pay/:token/qr.png plus order
-   * details (merchant, amount, order id, note, expiry, reference).
-   * Pure client-side — no extra server route, no extra dependency.
+   * Render the branded QR card to a canvas and return it as a PNG Blob.
+   * Used by both the Download and Share flows.
    */
-  const downloadQr = async () => {
-    if (!order || downloading) return;
-    setDownloading(true);
+  const buildQrCardBlob = async (): Promise<{ blob: Blob; orderRefLabel: string }> => {
+    if (!order) throw new Error('order missing');
+
+    const qrRes = await fetch(`/api/pay/${order.public_token}/qr.png?size=720`);
+    const qrBlob = await qrRes.blob();
+    const qrUrl = URL.createObjectURL(qrBlob);
     try {
-      const qrRes = await fetch(`/api/pay/${order.public_token}/qr.png?size=720`);
-      const qrBlob = await qrRes.blob();
-      const qrUrl = URL.createObjectURL(qrBlob);
       const qrImg = await new Promise<HTMLImageElement>((resolve, reject) => {
         const img = new Image();
         img.onload = () => resolve(img);
@@ -915,21 +915,92 @@ export default function PayPage() {
       const pngBlob: Blob = await new Promise((resolve, reject) => {
         canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png');
       });
-      const url = URL.createObjectURL(pngBlob);
+      return { blob: pngBlob, orderRefLabel };
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(qrUrl), 1000);
+    }
+  };
+
+  /**
+   * Render the branded QR card and trigger a PNG download.
+   */
+  const downloadQr = async () => {
+    if (!order || downloading) return;
+    setDownloading(true);
+    try {
+      const { blob, orderRefLabel } = await buildQrCardBlob();
+      const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `payment-qr-${orderRefLabel}.png`;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      setTimeout(() => {
-        URL.revokeObjectURL(url);
-        URL.revokeObjectURL(qrUrl);
-      }, 1000);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch {
       alert('Could not prepare QR download. Please try again.');
     } finally {
       setDownloading(false);
+    }
+  };
+
+  /**
+   * Share the branded QR via the device's native share sheet (WhatsApp,
+   * Telegram, Mail, etc.) using Web Share Level 2 with files. Falls back
+   * to URL share, then to copying the payment page URL.
+   */
+  const shareQr = async () => {
+    if (!order || sharing) return;
+    setSharing(true);
+    setShareMsg(null);
+    const payUrl = typeof window !== 'undefined'
+      ? `${window.location.origin}/pay/${order.public_token}`
+      : '';
+    const shareTitle = `Payment to ${order.payee_name || 'Merchant'}`;
+    const shareText = `Pay ₹${order.amount.toFixed(2)} to ${order.payee_name || 'Merchant'} via UPI.${payUrl ? `\n${payUrl}` : ''}`;
+
+    try {
+      const nav: any = navigator;
+
+      // 1) Native share with image file (WhatsApp, Telegram, Mail, ...)
+      if (typeof nav.share === 'function') {
+        try {
+          const { blob, orderRefLabel } = await buildQrCardBlob();
+          const file = new File([blob], `payment-qr-${orderRefLabel}.png`, { type: 'image/png' });
+          const payload: any = { files: [file], title: shareTitle, text: shareText };
+          if (typeof nav.canShare !== 'function' || nav.canShare(payload)) {
+            await nav.share(payload);
+            setShareMsg('Shared');
+            return;
+          }
+        } catch (err: any) {
+          // user-cancel: bail silently; otherwise fall through
+          if (err?.name === 'AbortError') return;
+        }
+
+        // 2) Native share with URL only
+        try {
+          await nav.share({ title: shareTitle, text: shareText, url: payUrl || undefined });
+          setShareMsg('Shared');
+          return;
+        } catch (err: any) {
+          if (err?.name === 'AbortError') return;
+        }
+      }
+
+      // 3) Clipboard fallback
+      if (payUrl && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(payUrl);
+        setShareMsg('Link copied');
+        return;
+      }
+
+      setShareMsg('Sharing not supported on this device');
+    } catch {
+      setShareMsg('Could not share. Try Download instead.');
+    } finally {
+      setSharing(false);
+      setTimeout(() => setShareMsg(null), 2200);
     }
   };
 
@@ -1070,7 +1141,18 @@ export default function PayPage() {
             >
               {downloading ? 'Preparing…' : 'Download QR Code'}
             </button>
+            <button
+              type="button"
+              className="pp-btn ghost"
+              onClick={shareQr}
+              disabled={sharing}
+              aria-label="Share QR via WhatsApp, Telegram, email or another app"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6 }}><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+              {sharing ? 'Opening…' : 'Share QR'}
+            </button>
           </div>
+          {shareMsg && <div className="pp-share-toast" role="status">{shareMsg}</div>}
           <div className="pp-poll-row">
             <span className={`pp-dot ${liveClass}`} />
             {liveLabel}

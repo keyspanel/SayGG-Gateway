@@ -1649,6 +1649,20 @@ code {
   border-color: var(--gw-border);
 }
 .pp-btn.ghost:hover { background: var(--gw-surface-hover); }
+.pp-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.pp-share-toast {
+  margin-top: -2px;
+  padding: 8px 12px;
+  text-align: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--gw-text-soft);
+  background: var(--gw-bg-2);
+  border: 1px solid var(--gw-border);
+  border-radius: 8px;
+  animation: gw-fade-in 0.2s ease-out;
+}
 
 .pp-poll-row {
   display: flex; align-items: center; gap: 8px;
