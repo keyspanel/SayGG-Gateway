@@ -636,6 +636,15 @@ export default function PayPage() {
   const LP_MS = 450;
   const LP_MOVE_PX = 10;
 
+  // ── Performance cache for the branded QR card ──────────────────────────
+  // The QR PNG is fetched and decoded as soon as the order is loaded so the
+  // Download / Share buttons don't wait on a server round-trip. The fully
+  // rendered JPEG card is also cached after the first build and reused —
+  // both buttons hit the cache after the first interaction.
+  const qrImgRef = useRef<HTMLImageElement | null>(null);
+  const qrFetchPromiseRef = useRef<Promise<HTMLImageElement> | null>(null);
+  const cardBlobRef = useRef<{ blob: Blob; orderRefLabel: string; tokenKey: string } | null>(null);
+
   // Apply a snapshot, but never let a stale "pending" overwrite a confirmed terminal state.
   const applySnapshot = useCallback((next: PayOrder) => {
     setOrder((prev) => {
@@ -814,47 +823,94 @@ export default function PayPage() {
   const showCountdown = order.status === 'pending' && order.expires_at && expiresMs > 0;
 
   /**
-   * Render the branded QR receipt card to a canvas and return it as a PNG
+   * Pre-fetch the QR PNG and decode it the moment the order is ready, so
+   * that when the user taps Download / Share the canvas can be drawn
+   * synchronously with no network or decode latency. Cached card blob is
+   * also reset whenever the order's public_token changes.
+   */
+  useEffect(() => {
+    const tk = order?.public_token;
+    if (!tk) return;
+    cardBlobRef.current = null; // new order ⇒ stale card
+    qrImgRef.current = null;
+    qrFetchPromiseRef.current = (async () => {
+      const res = await fetch(`/api/pay/${tk}/qr.png?size=2048`);
+      if (!res.ok) throw new Error(`QR fetch HTTP ${res.status}`);
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error('QR decode failed'));
+        i.src = objUrl;
+      });
+      qrImgRef.current = img;
+      // Keep the object URL alive — image relies on it for decoding.
+      return img;
+    })().catch((e) => {
+      console.warn('[pay] QR prefetch failed', e);
+      throw e;
+    });
+  }, [order?.public_token]);
+
+  /**
+   * Render the branded QR receipt card to a canvas and return it as a JPEG
    * Blob. Used by both Download and Share.
    *
-   * The card is laid out in a 1080×1620 logical coordinate space, but the
-   * canvas backing store is multiplied by SCALE so the resulting PNG is
-   * 4× larger (4320×6480 — well above 4K). All text, strokes, and the
-   * embedded QR are rendered natively at that resolution, so fonts stay
-   * razor-sharp instead of blurring like a CSS upscale would.
+   * Performance: the QR image is taken from the prefetch cache (no network
+   * wait), and the fully built card blob is cached on the first call so
+   * repeat clicks (e.g. Download then Share) are instant.
    *
-   * Bold weights are bumped a notch (700→800, 600→700, etc.) so headings
-   * read crisply when the image is viewed at small sizes in chat apps.
+   * Quality: drawn in a 1080×1620 logical coordinate space and scaled 3×
+   * onto a 3240×4860 backing store — still well above 4K UHD (3840×2160) —
+   * with high-quality image smoothing and bold font weights so all text and
+   * the embedded QR are razor-sharp. Output is JPEG at quality 0.94, which
+   * looks visually identical to PNG for a card like this but is roughly
+   * one-quarter the file size. The QR remains scannable thanks to error
+   * correction H + a 4-module quiet zone.
    */
   const buildQrCardBlob = async (): Promise<{ blob: Blob; orderRefLabel: string }> => {
     if (!order) throw new Error('order missing');
 
-    // Embed a true 4K QR — at 4× scale the QR region (720 logical px) maps
-    // to 2880 device px, so a 4096-source decodes to crisp pixels with no
-    // upscaling artifacts.
-    const qrRes = await fetch(`/api/pay/${order.public_token}/qr.png?size=4096`);
-    const qrBlob = await qrRes.blob();
-    const qrUrl = URL.createObjectURL(qrBlob);
-    try {
-      const qrImg = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = reject;
-        img.src = qrUrl;
-      });
+    // Reuse a previously-rendered card for this same order ⇒ instant.
+    const cached = cardBlobRef.current;
+    if (cached && cached.tokenKey === order.public_token) {
+      return { blob: cached.blob, orderRefLabel: cached.orderRefLabel };
+    }
 
-      const W = 1080;
-      const H = 1620;
-      const SCALE = 4; // → 4320 × 6480 PNG
-      const canvas = document.createElement('canvas');
-      canvas.width = W * SCALE;
-      canvas.height = H * SCALE;
-      const ctx = canvas.getContext('2d')!;
-      ctx.scale(SCALE, SCALE);
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      // Better text rendering hints when supported.
-      (ctx as any).textRendering = 'geometricPrecision';
+    // Use the prefetched, decoded QR image when available; otherwise wait
+    // for the in-flight prefetch to finish. Only fall back to a fresh
+    // fetch if no prefetch has been kicked off (defensive).
+    let qrImg = qrImgRef.current;
+    if (!qrImg) {
+      if (qrFetchPromiseRef.current) {
+        qrImg = await qrFetchPromiseRef.current;
+      } else {
+        const res = await fetch(`/api/pay/${order.public_token}/qr.png?size=2048`);
+        const blob = await res.blob();
+        const objUrl = URL.createObjectURL(blob);
+        qrImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const i = new Image();
+          i.onload = () => resolve(i);
+          i.onerror = reject;
+          i.src = objUrl;
+        });
+        qrImgRef.current = qrImg;
+      }
+    }
+
+    const W = 1080;
+    const H = 1620;
+    const SCALE = 3; // → 3240 × 4860 (above 4K UHD)
+    const canvas = document.createElement('canvas');
+    canvas.width = W * SCALE;
+    canvas.height = H * SCALE;
+    const ctx = canvas.getContext('2d')!;
+    ctx.scale(SCALE, SCALE);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    // Better text rendering hints when supported.
+    (ctx as any).textRendering = 'geometricPrecision';
 
       const FONT_STACK = '"Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
@@ -939,13 +995,21 @@ export default function PayPage() {
       ctx.fillText(order.txn_ref, W - 64, H - 40);
       ctx.textAlign = 'left';
 
-      const pngBlob: Blob = await new Promise((resolve, reject) => {
-        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png');
-      });
-      return { blob: pngBlob, orderRefLabel };
-    } finally {
-      setTimeout(() => URL.revokeObjectURL(qrUrl), 1000);
-    }
+    const orderRefLabelOut = order.client_order_id || order.txn_ref;
+    const jpegBlob: Blob = await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error('toBlob failed'))),
+        'image/jpeg',
+        0.94,
+      );
+    });
+
+    cardBlobRef.current = {
+      blob: jpegBlob,
+      orderRefLabel: orderRefLabelOut,
+      tokenKey: order.public_token,
+    };
+    return { blob: jpegBlob, orderRefLabel: orderRefLabelOut };
   };
 
   /**
@@ -962,7 +1026,7 @@ export default function PayPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `PayGateway-QR-${orderRefLabel}.png`;
+      a.download = `PayGateway-QR-${orderRefLabel}.jpg`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -996,7 +1060,7 @@ export default function PayPage() {
       if (typeof nav.share === 'function') {
         try {
           const { blob, orderRefLabel } = await buildQrCardBlob();
-          const file = new File([blob], `payment-qr-${orderRefLabel}.png`, { type: 'image/png' });
+          const file = new File([blob], `PayGateway-QR-${orderRefLabel}.jpg`, { type: 'image/jpeg' });
           const payload: any = { files: [file], title: shareTitle, text: shareText };
           if (typeof nav.canShare !== 'function' || nav.canShare(payload)) {
             await nav.share(payload);
