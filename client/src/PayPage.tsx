@@ -903,9 +903,9 @@ export default function PayPage() {
               onContextMenu={(e) => e.preventDefault()}
               onDragStart={(e) => e.preventDefault()}
             />
-            <span className="pp-qr-hint" aria-hidden="true">
-              {downloading ? 'Preparing…' : 'Tap or long-press to save'}
-            </span>
+            {downloading && (
+              <span className="pp-qr-hint" aria-hidden="true">Preparing…</span>
+            )}
           </div>
           <ol className="pp-steps">
             <li>Open any UPI app — GPay, PhonePe, Paytm, BHIM.</li>
