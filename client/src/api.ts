@@ -5,23 +5,60 @@ export function getGwToken(): string | null { return localStorage.getItem(TOKEN_
 export function setGwToken(t: string): void { localStorage.setItem(TOKEN_KEY, t); }
 export function clearGwToken(): void { localStorage.removeItem(TOKEN_KEY); }
 
-export async function gwApi(path: string, options: RequestInit = {}): Promise<any> {
+/**
+ * Lower-level API caller. Pass a full /api/... path. On 401 the session is
+ * cleared. Public endpoints (e.g. /api/billing/pay/:token) work without a
+ * token. Throws an Error whose `.code` carries the server error code (so the
+ * UI can branch on PLAN_REQUIRED, PLAN_FEATURE_LOCKED, etc).
+ */
+export class ApiError extends Error {
+  status: number;
+  code: string;
+  details: any;
+  constructor(message: string, status: number, code: string, details?: any) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+export async function apiCall(fullPath: string, options: RequestInit = {}): Promise<any> {
   const token = getGwToken();
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(options.headers as any) };
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${BASE}${path}`, { ...options, headers });
-  if (res.status === 401) {
-    clearGwToken();
-    if (!path.startsWith('/auth/')) window.location.href = '/gateway/login';
-    throw new Error('Session expired');
-  }
+  const res = await fetch(fullPath, { ...options, headers });
   let data: any = null;
   try { data = await res.json(); } catch { data = {}; }
-  if (!res.ok) throw new Error(data?.message || data?.error || data?.code || 'Request failed');
+  if (res.status === 401) {
+    // Only clear + bounce when the route was attempted with a token (i.e. the
+    // user thought they were logged in). Public token-based routes still work.
+    if (token) {
+      clearGwToken();
+      if (!fullPath.includes('/auth/')) window.location.href = '/gateway/login';
+    }
+    throw new ApiError(data?.message || 'Session expired', 401, data?.code || 'AUTH_REQUIRED', data?.details);
+  }
+  if (!res.ok) {
+    throw new ApiError(
+      data?.message || data?.error || 'Request failed',
+      res.status,
+      data?.code || 'REQUEST_FAILED',
+      data?.details,
+    );
+  }
   if (data && typeof data === 'object' && 'success' in data && 'data' in data) return data.data;
   return data;
 }
 
+export const apiGet = (p: string) => apiCall(p);
+export const apiPost = (p: string, b?: any) => apiCall(p, { method: 'POST', body: JSON.stringify(b || {}) });
+export const apiPut = (p: string, b?: any) => apiCall(p, { method: 'PUT', body: JSON.stringify(b || {}) });
+export const apiPatch = (p: string, b?: any) => apiCall(p, { method: 'PATCH', body: JSON.stringify(b || {}) });
+export const apiDelete = (p: string) => apiCall(p, { method: 'DELETE' });
+
+/* Backwards-compatible /api/gateway helpers used by Dashboard/Settings/Docs/Transactions */
+export const gwApi = (p: string, options: RequestInit = {}) => apiCall(`${BASE}${p}`, options);
 export const gwGet = (p: string) => gwApi(p);
 export const gwPost = (p: string, b?: any) => gwApi(p, { method: 'POST', body: JSON.stringify(b || {}) });
 export const gwPut = (p: string, b?: any) => gwApi(p, { method: 'PUT', body: JSON.stringify(b || {}) });

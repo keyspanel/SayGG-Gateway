@@ -71,6 +71,14 @@ router.get('/:token', tokenGuard, payGetLimiter, async (req: Request, res: Respo
     let order = await loadOrderByToken(req.params.token);
     if (!order) return apiError(res, 404, 'Payment link not found or invalid', 'PAYMENT_LINK_NOT_FOUND');
 
+    // Server-mode orders intentionally do not have a hosted page — the
+    // merchant is responsible for rendering their own UI from the API
+    // response. Hide the order entirely behind the same 404 to avoid
+    // leaking that the token exists.
+    if ((order as any).order_mode === 'server') {
+      return apiError(res, 404, 'Payment link not found or invalid', 'PAYMENT_LINK_NOT_FOUND');
+    }
+
     if (order.status === 'pending' && isOrderExpiredAt(order.expires_at)) {
       const t = await transitionOrder({
         orderId: order.id,
@@ -94,6 +102,9 @@ router.post('/:token/refresh', tokenGuard, payRefreshLimiter, async (req: Reques
   try {
     let order = await loadOrderByToken(req.params.token);
     if (!order) return apiError(res, 404, 'Payment link not found or invalid', 'PAYMENT_LINK_NOT_FOUND');
+    if ((order as any).order_mode === 'server') {
+      return apiError(res, 404, 'Payment link not found or invalid', 'PAYMENT_LINK_NOT_FOUND');
+    }
 
     const cfg = await loadMerchant(order.user_id);
     if (cfg && order.status === 'pending') {
@@ -131,7 +142,7 @@ router.get('/:token/stream', tokenGuard, sseConnectLimiter, async (req: Request,
   }
 
   const order = await loadOrderByToken(token);
-  if (!order) {
+  if (!order || (order as any).order_mode === 'server') {
     releaseConcurrent('pay_sse', ip);
     return apiError(res, 404, 'Payment link not found or invalid', 'PAYMENT_LINK_NOT_FOUND');
   }
@@ -235,6 +246,8 @@ router.get('/:token/qr.png', tokenGuard, qrLimiter, async (req: Request, res: Re
     if (!order || !order.upi_payload) {
       return res.status(404).json({ success: false, message: 'QR not available', code: 'QR_NOT_AVAILABLE' });
     }
+    // Server-mode QR is exposed for merchants who want the raw QR; we still
+    // serve it. (The hosted HTML page itself is what's gated above.)
 
     const requested = pickQrSize(req.query.size);
     let size: QrSize = requested;

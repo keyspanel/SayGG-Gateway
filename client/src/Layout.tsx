@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useGwAuth } from './AuthCtx';
 
-const NAV: { to: string; label: string; end?: boolean; icon: React.ReactNode }[] = [
+interface NavItem { to: string; label: string; end?: boolean; icon: React.ReactNode; ownerOnly?: boolean; }
+
+const NAV: NavItem[] = [
   {
     to: '/gateway', label: 'Overview', end: true,
     icon: <><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></>,
@@ -18,6 +20,14 @@ const NAV: { to: string; label: string; end?: boolean; icon: React.ReactNode }[]
   {
     to: '/gateway/docs', label: 'API Reference',
     icon: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></>,
+  },
+  {
+    to: '/gateway/billing', label: 'Billing',
+    icon: <><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><line x1="6" y1="15" x2="10" y2="15"/></>,
+  },
+  {
+    to: '/gateway/owner', label: 'Owner Panel', ownerOnly: true,
+    icon: <><path d="M12 2 4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6z"/><polyline points="9 12 11 14 15 10"/></>,
   },
 ];
 
@@ -63,6 +73,18 @@ function ThemeToggle() {
   );
 }
 
+function PlanPill({ user }: { user: { is_owner: boolean; active_subscription: any } }) {
+  if (user.is_owner) return <span className="gw-plan-pill owner">Owner</span>;
+  const sub = user.active_subscription;
+  if (!sub) return <span className="gw-plan-pill warn">No active plan</span>;
+  const days = sub.days_left;
+  return (
+    <span className={`gw-plan-pill ok${days != null && days <= 3 ? ' ending' : ''}`} title={sub.plan_name}>
+      {sub.plan_name}{days != null ? ` · ${days}d` : ''}
+    </span>
+  );
+}
+
 export default function GwLayout() {
   const { user, logout } = useGwAuth();
   const loc = useLocation();
@@ -76,7 +98,8 @@ export default function GwLayout() {
 
   useEffect(() => { setOpen(false); }, [loc.pathname]);
 
-  const current = NAV.find((n) => (n.end ? loc.pathname === n.to : loc.pathname.startsWith(n.to)));
+  const visibleNav = NAV.filter((n) => !n.ownerOnly || user?.is_owner);
+  const current = visibleNav.find((n) => (n.end ? loc.pathname === n.to : loc.pathname.startsWith(n.to)));
 
   return (
     <div className="gw-shell">
@@ -88,12 +111,12 @@ export default function GwLayout() {
           </div>
         </div>
         <nav className="gw-nav">
-          {NAV.map((n) => (
+          {visibleNav.map((n) => (
             <NavLink
               key={n.to}
               to={n.to}
               end={n.end}
-              className={({ isActive }) => `gw-nav-item${isActive ? ' active' : ''}`}
+              className={({ isActive }) => `gw-nav-item${isActive ? ' active' : ''}${n.ownerOnly ? ' owner' : ''}`}
               onClick={() => setOpen(false)}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -109,6 +132,7 @@ export default function GwLayout() {
             <div className="gw-user-text">
               <div className="gw-user-name">{user?.username}</div>
               <div className="gw-user-mail">{user?.email}</div>
+              {user && <PlanPill user={user} />}
             </div>
           </div>
           <button className="gw-btn-ghost gw-btn-block sm" onClick={logout}>
@@ -133,6 +157,7 @@ export default function GwLayout() {
           </button>
           <div className="gw-top-mark">PG</div>
           <div className="gw-top-title">{current?.label || 'Gateway'}</div>
+          {user && <PlanPill user={user} />}
           <ThemeToggle />
         </header>
         <main className="gw-content"><Outlet /></main>

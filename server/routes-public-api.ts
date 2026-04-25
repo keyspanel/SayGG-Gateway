@@ -20,6 +20,7 @@ import { rateLimit } from './rate-limit';
 import { transitionOrder, isOrderExpiredAt } from './order-state';
 import { logOrderEvent } from './audit';
 import { shapeOrder, loadMerchant } from './order-pay-helpers';
+import { canAccessMethod, OrderMode } from './authz';
 
 function genPublicToken(): string {
   // url-safe ~22 chars, ~128 bits
@@ -74,23 +75,44 @@ function fingerprintRequest(parts: Record<string, unknown>): string {
   return crypto.createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 }
 
-function shapeOrderForApi(o: any) {
-  return {
+/**
+ * Shape an order for the JSON API response.
+ *
+ * Server-mode orders return raw UPI payload + QR but never expose a hosted
+ * payment_page_url, since the hosted page is intentionally disabled for
+ * Method 1 integrations. Hosted-mode orders flip that — they return the
+ * payment_page_url their customer should be redirected to and omit the raw
+ * UPI payload (the merchant doesn't render the QR themselves).
+ */
+function shapeOrderForApi(o: any, baseReq?: { protocol: string; get: (h: string) => string | undefined }) {
+  const mode: OrderMode = (o.order_mode === 'server' ? 'server' : 'hosted');
+  const base = {
     order_id: o.id,
     txn_ref: o.txn_ref,
     client_order_id: o.client_order_id,
     amount: parseFloat(o.amount),
     currency: o.currency,
     status: o.status,
-    payment_link: o.upi_payload,
-    upi_payload: o.upi_payload,
+    mode,
     public_token: o.public_token,
-    qr_image_url: o.public_token ? `/api/pay/${o.public_token}/qr.png` : undefined,
     created_at: o.created_at,
     expires_at: o.expires_at,
     callback_url: o.callback_url || undefined,
     redirect_url: o.redirect_url || undefined,
     cancel_url: o.cancel_url || undefined,
+  };
+  if (mode === 'server') {
+    return {
+      ...base,
+      payment_link: o.upi_payload,
+      upi_payload: o.upi_payload,
+      qr_image_url: o.public_token ? `/api/pay/${o.public_token}/qr.png` : undefined,
+    };
+  }
+  // hosted
+  return {
+    ...base,
+    payment_page_url: baseReq && o.public_token ? buildPaymentPageUrl(baseReq, o.public_token) : undefined,
   };
 }
 
@@ -101,6 +123,22 @@ function shapeOrderForApi(o: any) {
 router.post('/create-order', gwApiToken, createOrderLimiter, async (req: GwApiRequest, res: Response) => {
   try {
     const user = req.gwUser!;
+
+    // ---- mode (server | hosted) ----
+    const rawMode = String(req.body.mode || '').trim().toLowerCase();
+    if (!rawMode) {
+      return apiError(res, 400, 'mode is required (use "server" or "hosted")', 'ORDER_MODE_REQUIRED', { field: 'mode' });
+    }
+    if (rawMode !== 'server' && rawMode !== 'hosted') {
+      return apiError(res, 400, 'mode must be "server" or "hosted"', 'VALIDATION_ERROR', { field: 'mode' });
+    }
+    const mode: OrderMode = rawMode;
+
+    // Enforce plan access (owner is exempt inside canAccessMethod).
+    const access = await canAccessMethod(user, mode);
+    if (!access.allowed) {
+      return apiError(res, 403, access.reason || 'Feature not available on your plan.', access.code || 'PLAN_FEATURE_LOCKED');
+    }
 
     // ---- Input validation ----
     const amountP = parseAmount(req.body.amount);
@@ -204,13 +242,13 @@ router.post('/create-order', gwApiToken, createOrderLimiter, async (req: GwApiRe
         `INSERT INTO gw_orders
            (user_id, client_order_id, txn_ref, amount, currency, status, note, customer_reference,
             callback_url, redirect_url, cancel_url, upi_payload, payment_link, public_token, expires_at,
-            idempotency_key, idempotency_fingerprint)
+            idempotency_key, idempotency_fingerprint, order_mode)
          VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9,$10,$11,$11,$12,
                  NOW() + INTERVAL '${ORDER_TTL_MIN} minutes',
-                 $13,$14)
+                 $13,$14,$15)
          RETURNING *`,
         [user.id, client_order_id, txnRef, amount.toFixed(2), currency, note, customer_reference,
-         callback_url, redirect_url, cancel_url, upiPayload, publicToken, idempotencyKey, idempotencyKey ? fingerprint : null],
+         callback_url, redirect_url, cancel_url, upiPayload, publicToken, idempotencyKey, idempotencyKey ? fingerprint : null, mode],
       );
     } catch (e: any) {
       // Unique-violation race — another concurrent request inserted first.
@@ -243,13 +281,10 @@ router.post('/create-order', gwApiToken, createOrderLimiter, async (req: GwApiRe
       user_id: user.id,
       event: 'order.created',
       status_after: 'pending',
-      meta: { has_callback: !!callback_url, has_redirect: !!redirect_url, has_cancel: !!cancel_url, idempotent: !!idempotencyKey },
+      meta: { mode, has_callback: !!callback_url, has_redirect: !!redirect_url, has_cancel: !!cancel_url, idempotent: !!idempotencyKey },
     }).catch(() => {});
 
-    apiSuccess(res, 'Order created', {
-      ...shapeOrderForApi(order),
-      payment_page_url: buildPaymentPageUrl(req, publicToken),
-    });
+    apiSuccess(res, 'Order created', shapeOrderForApi(order, req));
   } catch (e) {
     console.error('[gw/create-order]', e);
     apiError(res, 500, 'Failed to create order', 'CREATE_ORDER_FAILED');
@@ -355,6 +390,7 @@ async function checkOrder(req: GwApiRequest, res: Response) {
       amount: parseFloat(order.amount),
       currency: order.currency,
       status: order.status,
+      mode: (order.order_mode === 'server' ? 'server' : 'hosted'),
       gateway_txn_id: order.gateway_txn_id,
       bank_rrn: order.gateway_bank_txn_id,
       customer_reference: order.customer_reference,

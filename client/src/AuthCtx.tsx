@@ -1,7 +1,29 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { clearGwToken, gwGet, gwPost, setGwToken } from './api';
 
-interface GwUser { id: number; username: string; email: string; has_token: boolean; }
+export interface ActiveSubscription {
+  id: number;
+  plan_id: number;
+  plan_key: string;
+  plan_name: string;
+  method_access: 'server' | 'hosted' | 'master';
+  status: string;
+  starts_at: string;
+  expires_at: string | null;
+  days_left: number | null;
+}
+
+export interface GwUser {
+  id: number;
+  username: string;
+  email: string;
+  has_token: boolean;
+  role: 'owner' | 'user';
+  is_owner: boolean;
+  access: { server: boolean; hosted: boolean; master: boolean };
+  active_subscription: ActiveSubscription | null;
+}
+
 interface Ctx {
   user: GwUser | null;
   loading: boolean;
@@ -10,14 +32,32 @@ interface Ctx {
   logout: () => void;
   refresh: () => Promise<void>;
 }
+
 const C = createContext<Ctx | null>(null);
+
+const EMPTY_ACCESS = { server: false, hosted: false, master: false };
+
+function normalize(raw: any): GwUser | null {
+  if (!raw) return null;
+  return {
+    id: raw.id,
+    username: raw.username,
+    email: raw.email,
+    has_token: !!raw.has_token,
+    role: raw.role === 'owner' ? 'owner' : 'user',
+    is_owner: !!raw.is_owner,
+    access: raw.access || EMPTY_ACCESS,
+    active_subscription: raw.active_subscription || null,
+  };
+}
 
 export function GwAuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<GwUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = async () => {
-    try { const u = await gwGet('/auth/me'); setUser(u); } catch { setUser(null); }
+    try { const u = await gwGet('/auth/me'); setUser(normalize(u)); }
+    catch { setUser(null); }
   };
 
   useEffect(() => {

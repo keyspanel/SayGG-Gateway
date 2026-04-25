@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { gwGet } from './api';
+import { useGwAuth } from './AuthCtx';
 
 export default function GwDashboard() {
+  const { user } = useGwAuth();
   const [data, setData] = useState<any>(null);
   const [err, setErr] = useState('');
 
@@ -14,6 +16,8 @@ export default function GwDashboard() {
   const s = data.stats;
   const setupComplete = !!data.setup_complete;
   const hasToken = !!data.has_token;
+  const sub = user?.active_subscription;
+  const planLocked = !user?.is_owner && !sub;
 
   return (
     <div className="gw-page">
@@ -23,6 +27,11 @@ export default function GwDashboard() {
           <p>Real-time view of your gateway.</p>
         </div>
         <div className="gw-status-pills">
+          {!user?.is_owner && (
+            <span className={`gw-pill ${sub ? 'ok' : 'warn'}`}>
+              {sub ? `Plan: ${sub.plan_name}` : 'No active plan'}
+            </span>
+          )}
           <span className={`gw-pill ${setupComplete ? 'ok' : 'warn'}`}>
             {setupComplete ? 'Setup complete' : 'Setup required'}
           </span>
@@ -32,7 +41,22 @@ export default function GwDashboard() {
         </div>
       </div>
 
-      {(!setupComplete || !hasToken) && (
+      {planLocked && (
+        <div className="gw-card feature gw-lock-card">
+          <div className="gw-card-h">
+            <h3>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              Choose a plan to start
+            </h3>
+          </div>
+          <p>UPI setup, API tokens, and order creation unlock once you have an active plan.</p>
+          <div className="gw-actions">
+            <Link to="/gateway/billing" className="gw-btn-primary">View plans →</Link>
+          </div>
+        </div>
+      )}
+
+      {!planLocked && (!setupComplete || !hasToken) && (
         <div className="gw-card">
           <div className="gw-card-h">
             <h3>
@@ -82,6 +106,10 @@ export default function GwDashboard() {
           <strong>API Reference</strong>
           <span>Token, endpoints and examples.</span>
         </Link>
+        <Link to="/gateway/billing" className="gw-shortcut">
+          <strong>Billing</strong>
+          <span>Plans, current subscription and invoices.</span>
+        </Link>
       </div>
 
       <div className="gw-card">
@@ -101,12 +129,13 @@ export default function GwDashboard() {
         ) : (
           <div className="gw-table">
             <div className="gw-tr head">
-              <span>Txn Ref</span><span>Order ID</span><span>Amount</span><span>Status</span><span>Created</span>
+              <span>Txn Ref</span><span>Order ID</span><span>Mode</span><span>Amount</span><span>Status</span><span>Created</span>
             </div>
             {data.recent.map((o: any) => (
               <div className="gw-tr" key={o.id}>
                 <span data-label="Txn Ref" className="mono small">{o.txn_ref}</span>
                 <span data-label="Order ID">{o.client_order_id || `#${o.id}`}</span>
+                <span data-label="Mode"><ModeBadge mode={o.order_mode || 'hosted'} /></span>
                 <span data-label="Amount" style={{ fontWeight: 700 }}>₹{parseFloat(o.amount).toFixed(2)}</span>
                 <span data-label="Status"><StatusBadge status={o.status} /></span>
                 <span data-label="Created" className="gw-muted" style={{ fontSize: 12, margin: 0 }}>{new Date(o.created_at).toLocaleString()}</span>
@@ -131,4 +160,9 @@ function Stat({ label, value, accent, wide }: { label: string; value: any; accen
 export function StatusBadge({ status }: { status: string }) {
   const cls = ({ paid: 'ok', pending: 'warn', failed: 'bad', cancelled: 'bad', expired: 'mute' } as any)[status] || 'mute';
   return <span className={`gw-badge ${cls}`}>{status}</span>;
+}
+
+export function ModeBadge({ mode }: { mode: string }) {
+  const cls = mode === 'server' ? 'mode-server' : 'mode-hosted';
+  return <span className={`gw-badge ${cls}`} title={mode === 'server' ? 'Method 1 — JSON only' : 'Method 2 — hosted page'}>{mode}</span>;
 }

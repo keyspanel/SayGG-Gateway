@@ -41,7 +41,8 @@ router.get('/transactions', gwSession, async (req: GwSessionRequest, res: Respon
 
   const sql = `SELECT id, client_order_id, txn_ref, amount, currency, status, customer_reference,
                       callback_url, redirect_url, cancel_url, callback_sent, callback_sent_at, callback_status, callback_attempts,
-                      gateway_txn_id, gateway_bank_txn_id, created_at, expires_at, verified_at
+                      gateway_txn_id, gateway_bank_txn_id, created_at, expires_at, verified_at,
+                      COALESCE(order_mode, 'hosted') AS order_mode
                FROM gw_orders
                WHERE ${where.join(' AND ')}
                ORDER BY id DESC
@@ -64,7 +65,8 @@ router.get('/dashboard', gwSession, async (req: GwSessionRequest, res: Response)
     [userId],
   );
   const recent = await pool.query(
-    `SELECT id, txn_ref, client_order_id, amount, currency, status, created_at
+    `SELECT id, txn_ref, client_order_id, amount, currency, status, created_at,
+            COALESCE(order_mode, 'hosted') AS order_mode
      FROM gw_orders WHERE user_id=$1 ORDER BY id DESC LIMIT 10`,
     [userId],
   );

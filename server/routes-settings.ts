@@ -2,6 +2,7 @@ import express, { Response } from 'express';
 import pool from './db';
 import { gwSession, GwSessionRequest } from './auth-mw';
 import { apiError, apiSuccess, methodNotAllowed } from './api-response';
+import { getEffectiveAccess, isOwner } from './authz';
 
 const router = express.Router();
 
@@ -41,6 +42,13 @@ router.get('/', gwSession, async (req: GwSessionRequest, res: Response) => {
 });
 
 router.put('/', gwSession, async (req: GwSessionRequest, res: Response) => {
+  // Plan gate (owner exempt): only paid users can save merchant credentials.
+  if (!isOwner(req.gwUser!)) {
+    const eff = await getEffectiveAccess(req.gwUser!);
+    if (!eff.active_subscription) {
+      return apiError(res, 402, 'Choose a plan to start using the gateway.', 'PLAN_REQUIRED');
+    }
+  }
   const upi = String(req.body.paytm_upi_id || '').trim();
   const mid = String(req.body.paytm_merchant_id || '').trim();
   const mkey = String(req.body.paytm_merchant_key || '').trim();

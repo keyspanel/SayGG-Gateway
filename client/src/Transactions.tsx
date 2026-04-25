@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { gwGet, gwPost } from './api';
-import { StatusBadge } from './Dashboard';
+import { ModeBadge, StatusBadge } from './Dashboard';
 
 const STATUSES = ['', 'pending', 'paid', 'failed', 'cancelled', 'expired'];
+const MODES = ['', 'hosted', 'server'];
 const PAGE_SIZE = 25;
 
 export default function GwTransactions() {
@@ -10,6 +11,7 @@ export default function GwTransactions() {
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [status, setStatus] = useState('');
+  const [mode, setMode] = useState('');
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
@@ -20,13 +22,16 @@ export default function GwTransactions() {
     try {
       const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(off) });
       if (status) params.set('status', status);
+      if (mode) params.set('mode', mode);
       if (q) params.set('q', q);
       const d = await gwGet('/transactions?' + params.toString());
-      setItems(d.items); setTotal(d.total); setOffset(off);
+      // Filter by mode client-side too in case the API doesn't support it.
+      const filtered = mode ? d.items.filter((o: any) => (o.order_mode || 'hosted') === mode) : d.items;
+      setItems(filtered); setTotal(mode ? filtered.length : d.total); setOffset(off);
     } catch (e: any) { setErr(e.message); }
     finally { setLoading(false); }
   };
-  useEffect(() => { load(0); /* eslint-disable-next-line */ }, [status]);
+  useEffect(() => { load(0); /* eslint-disable-next-line */ }, [status, mode]);
 
   const refresh = async (id: number) => {
     setRefreshing(id);
@@ -53,6 +58,11 @@ export default function GwTransactions() {
             {STATUSES.map((s) => <option key={s} value={s}>{s ? s.charAt(0).toUpperCase() + s.slice(1) : 'All statuses'}</option>)}
           </select>
         </div>
+        <div className="gw-select-wrap">
+          <select value={mode} onChange={(e) => setMode(e.target.value)}>
+            {MODES.map((m) => <option key={m} value={m}>{m ? `Mode: ${m}` : 'All modes'}</option>)}
+          </select>
+        </div>
         <button className="gw-btn-primary" onClick={() => load(0)}>Search</button>
       </div>
 
@@ -72,7 +82,10 @@ export default function GwTransactions() {
             <div className="gw-txn" key={o.id}>
               <div className="gw-txn-row">
                 <div className="gw-txn-ref" title={o.txn_ref}>{o.txn_ref}</div>
-                <StatusBadge status={o.status} />
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <ModeBadge mode={o.order_mode || 'hosted'} />
+                  <StatusBadge status={o.status} />
+                </div>
               </div>
               <div className="gw-txn-amt">₹{parseFloat(o.amount).toFixed(2)} <span>{o.currency}</span></div>
               <div className="gw-txn-meta">
@@ -122,7 +135,7 @@ export default function GwTransactions() {
         </div>
       )}
 
-      {total > 0 && !loading && (
+      {total > 0 && !loading && !mode && (
         <div className="gw-pager">
           <span>{offset + 1}–{Math.min(offset + items.length, total)} of {total}</span>
           <div>

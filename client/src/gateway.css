@@ -2523,3 +2523,226 @@ code {
 @media (max-width: 640px) {
   .gw-method-grid { grid-template-columns: 1fr; }
 }
+
+/* =========================================================================
+   Plan / billing / owner-panel additions (T006)
+   ========================================================================= */
+
+/* Plan pill (sidebar + topbar) */
+.gw-plan-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 700;
+  padding: 3px 8px; border-radius: 999px;
+  border: 1px solid var(--gw-border);
+  background: var(--gw-bg-soft, #f3f4f6);
+  color: var(--gw-text-mute);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gw-plan-pill.ok      { background: rgba(22,163,74,0.10);  color: #15803d; border-color: rgba(22,163,74,0.25); }
+.gw-plan-pill.warn    { background: rgba(234,179,8,0.10);  color: #a16207; border-color: rgba(234,179,8,0.30); }
+.gw-plan-pill.ending  { background: rgba(234,88,12,0.10);  color: #c2410c; border-color: rgba(234,88,12,0.30); }
+.gw-plan-pill.owner   { background: var(--gw-primary-soft, rgba(79,70,229,0.10)); color: var(--gw-primary, #4f46e5); border-color: rgba(79,70,229,0.25); }
+
+/* Owner nav-item flag */
+.gw-nav-item.owner {
+  position: relative;
+}
+.gw-nav-item.owner::after {
+  content: 'OWNER';
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  font-size: 9px; font-weight: 800; letter-spacing: 0.08em;
+  padding: 2px 6px; border-radius: 6px;
+  color: var(--gw-primary, #4f46e5);
+  background: var(--gw-primary-soft, rgba(79,70,229,0.10));
+  border: 1px solid rgba(79,70,229,0.20);
+}
+.gw-nav-item.owner.active::after { background: rgba(255,255,255,0.18); color: #fff; border-color: rgba(255,255,255,0.30); }
+
+/* Lock card (shown when a plan / feature is missing) */
+.gw-lock-card {
+  border-style: dashed;
+}
+.gw-lock-card p { margin: 8px 0 0; color: var(--gw-text-mute); }
+
+/* Mode badges on orders */
+.gw-badge.mode-server {
+  background: rgba(2,132,199,0.10); color: #0369a1; border: 1px solid rgba(2,132,199,0.25);
+}
+.gw-badge.mode-hosted {
+  background: rgba(79,70,229,0.10); color: #4338ca; border: 1px solid rgba(79,70,229,0.25);
+}
+
+/* Two-column grid */
+.gw-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 900px) { .gw-grid-2 { grid-template-columns: 1fr; } }
+
+/* Plan grid + plan card */
+.gw-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  margin: 12px 0 4px;
+}
+.gw-plan {
+  position: relative;
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--gw-card-bg, #fff);
+  border: 1px solid var(--gw-border);
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease;
+}
+.gw-plan:hover { transform: translateY(-1px); border-color: rgba(79,70,229,0.40); box-shadow: 0 4px 16px rgba(15,23,42,0.06); }
+.gw-plan.featured {
+  border-color: var(--gw-primary, #4f46e5);
+  box-shadow: 0 8px 24px rgba(79,70,229,0.10);
+}
+.gw-plan.current {
+  border-color: #15803d;
+  box-shadow: 0 0 0 2px rgba(22,163,74,0.08);
+}
+.gw-plan-flag {
+  position: absolute; top: -10px; right: 14px;
+  background: var(--gw-primary, #4f46e5); color: #fff;
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.06em;
+  padding: 4px 10px; border-radius: 999px;
+  text-transform: uppercase;
+}
+.gw-plan-name {
+  font-size: 16px; font-weight: 700; color: var(--gw-text);
+}
+.gw-plan-price {
+  display: flex; align-items: baseline; gap: 8px;
+  font-weight: 800; color: var(--gw-text);
+}
+.gw-plan-price .now { font-size: 28px; line-height: 1; }
+.gw-plan-price .was { font-size: 14px; color: var(--gw-text-mute); text-decoration: line-through; font-weight: 600; }
+.gw-plan-price .per { font-size: 12.5px; color: var(--gw-text-mute); font-weight: 600; }
+.gw-plan-meta {
+  font-size: 12.5px; color: var(--gw-text-mute);
+  text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700;
+}
+.gw-plan-desc {
+  margin: 0; font-size: 13px; color: var(--gw-text-mute); line-height: 1.5;
+}
+.gw-plan-features {
+  list-style: none; padding: 0; margin: 4px 0 8px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.gw-plan-features li {
+  font-size: 13px; color: var(--gw-text);
+}
+
+/* Current plan summary (Billing page) */
+.gw-billing-current {
+  display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;
+  padding: 8px 0;
+}
+.gw-current-name {
+  font-size: 18px; font-weight: 800; color: var(--gw-text);
+}
+.gw-current-meta {
+  display: flex; gap: 16px; flex-wrap: wrap; margin-left: auto;
+}
+.gw-current-meta > div { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.gw-current-meta b { color: var(--gw-text-mute); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* =========================================================================
+   Public billing-pay page (BillingPayPage.tsx)
+   ========================================================================= */
+
+.bp-shell {
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px 16px;
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+}
+:root[data-theme="dark"] .bp-shell {
+  background: linear-gradient(180deg, #0b1220 0%, #1f1b3a 100%);
+}
+.bp-card {
+  width: 100%;
+  max-width: 460px;
+  background: var(--gw-card-bg, #fff);
+  border: 1px solid var(--gw-border);
+  border-radius: 18px;
+  padding: 22px;
+  box-shadow: 0 12px 40px rgba(15,23,42,0.10);
+  display: flex; flex-direction: column; gap: 14px;
+}
+.bp-h {
+  display: flex; gap: 12px; align-items: center;
+}
+.bp-brand {
+  width: 40px; height: 40px; border-radius: 10px;
+  background: var(--gw-primary, #4f46e5); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 16px; letter-spacing: 0.04em;
+}
+.bp-h-t { font-size: 16px; font-weight: 700; color: var(--gw-text); }
+.bp-h-s { font-size: 12px; }
+.bp-amt {
+  font-size: 32px; font-weight: 800; color: var(--gw-text);
+  text-align: center;
+  line-height: 1;
+}
+.bp-amt span { font-size: 13px; color: var(--gw-text-mute); font-weight: 600; margin-left: 4px; }
+.bp-status { display: flex; justify-content: center; }
+.bp-qr {
+  display: flex; justify-content: center;
+  background: #fff; padding: 12px; border-radius: 12px;
+  border: 1px solid var(--gw-border);
+}
+.bp-qr img { display: block; max-width: 100%; height: auto; image-rendering: pixelated; }
+.bp-qr-placeholder {
+  width: 280px; height: 280px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--gw-text-mute); font-size: 13px;
+  background: #f3f4f6; border-radius: 8px;
+}
+.bp-actions {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.bp-actions .gw-btn-primary, .bp-actions .gw-btn-ghost {
+  width: 100%; justify-content: center;
+}
+.bp-exp {
+  text-align: center; font-size: 12.5px; color: var(--gw-text-mute);
+}
+.bp-exp b { color: var(--gw-text); font-variant-numeric: tabular-nums; }
+.bp-paid, .bp-failed {
+  text-align: center; padding: 12px 0;
+  display: flex; flex-direction: column; gap: 8px; align-items: center;
+}
+.bp-paid h3, .bp-failed h3 { margin: 0; font-size: 18px; }
+.bp-tick {
+  width: 56px; height: 56px; border-radius: 999px;
+  background: rgba(22,163,74,0.12); color: #16a34a;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 32px; font-weight: 800;
+}
+.bp-meta {
+  display: flex; gap: 12px; flex-wrap: wrap; justify-content: space-between;
+  border-top: 1px solid var(--gw-border);
+  padding-top: 12px; font-size: 12px;
+}
+.bp-meta > div { display: flex; flex-direction: column; gap: 2px; }
+.bp-meta b { color: var(--gw-text-mute); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+.bp-meta .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+.bp-muted { color: var(--gw-text-mute); font-size: 12.5px; text-align: center; margin: -4px 0 0; }
+
+/* Full-screen boot loader */
+.gw-fullboot {
+  position: fixed; inset: 0;
+  background: var(--gw-bg, #f8fafc);
+}
+:root[data-theme="dark"] .gw-fullboot { background: #0b1220; }

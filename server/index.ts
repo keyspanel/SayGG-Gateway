@@ -9,6 +9,8 @@ import settingsRouter from './routes-settings';
 import ordersRouter from './routes-orders';
 import publicApiRouter from './routes-public-api';
 import payRouter from './routes-pay';
+import ownerRouter from './routes-owner';
+import billingRouter from './routes-billing';
 import { apiErrorHandler, apiNotFound, gatewayNotFound } from './api-response';
 import { startReconciler } from './reconciler';
 
@@ -37,6 +39,8 @@ app.use('/api/gateway', publicApiRouter);
 app.all('/api/gateway', gatewayNotFound);
 app.use('/api/gateway', gatewayNotFound);
 app.use('/api/pay', payRouter);
+app.use('/api/owner', ownerRouter);
+app.use('/api/billing', billingRouter);
 app.use('/api', apiNotFound);
 app.use(apiErrorHandler);
 

@@ -39,6 +39,17 @@ const HINTS: Record<string, string> = {
   SSE_TOO_MANY: 'Too many open live connections. Close unused tabs.',
   INVALID_TRANSITION: 'Order is already finalized and cannot be changed.',
   CALLBACK_BLOCKED: 'Callback URL was rejected by safety policy.',
+  OWNER_ONLY: 'Owner access required.',
+  FORBIDDEN: 'You do not have permission to perform this action.',
+  PLAN_REQUIRED: 'Choose a plan to start using the gateway.',
+  PLAN_EXPIRED: 'Your plan has expired. Renew to continue.',
+  PLAN_FEATURE_LOCKED: 'Your current plan does not include this feature.',
+  PLAN_NOT_FOUND: 'Pick a valid plan from the billing page.',
+  PLAN_INACTIVE: 'This plan is not currently available.',
+  PLATFORM_PAYMENT_NOT_CONFIGURED: 'Owner has not configured platform UPI yet. Try again later.',
+  PAYMENT_NOT_FOUND: 'Check the payment link or open a new one.',
+  ORDER_MODE_REQUIRED: 'Provide mode="server" or mode="hosted" in the request body.',
+  HOSTED_PAGE_NOT_AVAILABLE: 'Hosted page is not available for this order.',
 };
 
 export function apiSuccess(

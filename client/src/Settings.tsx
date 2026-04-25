@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { gwGet, gwPut } from './api';
+import { gwGet, gwPut, ApiError } from './api';
+import { useGwAuth } from './AuthCtx';
 
 export default function GwSettings() {
+  const { user } = useGwAuth();
   const [f, setF] = useState({ paytm_upi_id: '', paytm_merchant_id: '', paytm_merchant_key: '', paytm_env: 'production', payee_name: '' });
   const [loaded, setLoaded] = useState(false);
   const [hasKey, setHasKey] = useState(false);
@@ -11,6 +13,8 @@ export default function GwSettings() {
   const [showKey, setShowKey] = useState(false);
   const [msg, setMsg] = useState<{ ok?: string; err?: string }>({});
   const [busy, setBusy] = useState(false);
+
+  const planLocked = !user?.is_owner && !user?.active_subscription;
 
   const load = async () => {
     const d = await gwGet('/settings/');
@@ -37,7 +41,14 @@ export default function GwSettings() {
       setMsg({ ok: r.is_active ? 'Saved. Gateway is active — create your API token next.' : 'Saved.' });
       setF((s) => ({ ...s, paytm_merchant_key: '' }));
       await load();
-    } catch (e: any) { setMsg({ err: e.message }); }
+    } catch (e: any) {
+      const code = e instanceof ApiError ? e.code : '';
+      if (code === 'PLAN_REQUIRED' || code === 'PLAN_EXPIRED') {
+        setMsg({ err: 'You need an active plan to save UPI settings.' });
+      } else {
+        setMsg({ err: e.message });
+      }
+    }
     finally { setBusy(false); }
   };
 
@@ -52,6 +63,21 @@ export default function GwSettings() {
         </div>
         {active ? <span className="gw-badge ok">Active</span> : <span className="gw-badge warn">Setup required</span>}
       </div>
+
+      {planLocked && (
+        <div className="gw-card feature gw-lock-card">
+          <div className="gw-card-h">
+            <h3>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              Plan required
+            </h3>
+          </div>
+          <p>You can view your settings, but you'll need an active plan to save them and accept payments.</p>
+          <div className="gw-actions">
+            <Link to="/gateway/billing" className="gw-btn-primary">Choose a plan →</Link>
+          </div>
+        </div>
+      )}
 
       {msg.err && (
         <div className="gw-alert error">
@@ -128,7 +154,7 @@ export default function GwSettings() {
           </label>
 
           <div className="gw-actions">
-            <button className="gw-btn-primary" disabled={busy}>
+            <button className="gw-btn-primary" disabled={busy || planLocked}>
               {busy ? 'Saving…' : 'Save'}
             </button>
             {active && (
@@ -140,7 +166,7 @@ export default function GwSettings() {
         </form>
       </div>
 
-      {!active && (
+      {!active && !planLocked && (
         <div className="gw-alert info">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
           <span>Save valid credentials to unlock token creation.</span>

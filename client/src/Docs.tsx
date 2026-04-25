@@ -69,9 +69,31 @@ const TABS: { key: TabKey; label: string }[] = [
    Page
    ============================================================ */
 
+function PlanLockCard({ method, isOwner }: { method: 'server' | 'hosted'; isOwner: boolean }) {
+  if (isOwner) return null;
+  return (
+    <div className="gw-card feature gw-lock-card">
+      <div className="gw-card-h">
+        <h3>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          {method === 'server' ? 'Server API' : 'Hosted Page'} not in your plan
+        </h3>
+      </div>
+      <p>Upgrade to a plan that includes the <strong>{method}</strong> method to use this integration.</p>
+      <div className="gw-actions">
+        <Link to="/gateway/billing" className="gw-btn-primary">View plans →</Link>
+      </div>
+    </div>
+  );
+}
+
 export default function GwDocs() {
-  const { refresh } = useGwAuth();
+  const { refresh, user } = useGwAuth();
   const [tab, setTab] = useState<TabKey>('test');
+  const access = user?.access || { server: false, hosted: false, master: false };
+  const isOwner = !!user?.is_owner;
+  const canServer = isOwner || access.server || access.master;
+  const canHosted = isOwner || access.hosted || access.master;
 
   // ---- Token state (kept identical to previous behavior) ----
   const [token, setToken] = useState('');
@@ -172,9 +194,13 @@ export default function GwDocs() {
         ))}
       </div>
 
-      {tab === 'test'   && <TestTab   token={token} baseUrl={baseUrl} settingsActive={settingsActive} />}
-      {tab === 'server' && <ServerTab baseUrl={baseUrl} token={token} />}
-      {tab === 'hosted' && <HostedPageTab />}
+      {tab === 'test'   && <TestTab   token={token} baseUrl={baseUrl} settingsActive={settingsActive} canServer={canServer} canHosted={canHosted} />}
+      {tab === 'server' && (canServer
+        ? <ServerTab baseUrl={baseUrl} token={token} />
+        : <PlanLockCard method="server" isOwner={isOwner} />)}
+      {tab === 'hosted' && (canHosted
+        ? <HostedPageTab />
+        : <PlanLockCard method="hosted" isOwner={isOwner} />)}
       {tab === 'setup'  && <SetupTab  baseUrl={baseUrl} />}
     </div>
   );
@@ -293,7 +319,7 @@ function ApiTokenCard(props: {
    TEST TAB
    ============================================================ */
 
-function TestTab({ token, baseUrl, settingsActive }: { token: string; baseUrl: string; settingsActive: boolean }) {
+function TestTab({ token, baseUrl, settingsActive, canServer, canHosted }: { token: string; baseUrl: string; settingsActive: boolean; canServer: boolean; canHosted: boolean }) {
   return (
     <>
       <div className="gw-card">
@@ -314,7 +340,7 @@ function TestTab({ token, baseUrl, settingsActive }: { token: string; baseUrl: s
       </div>
 
       {token && settingsActive ? (
-        <TestConsole apiToken={token} baseUrl={baseUrl} />
+        <TestConsole apiToken={token} baseUrl={baseUrl} canServer={canServer} canHosted={canHosted} />
       ) : (
         <div className="gw-card">
           <div className="gw-card-h">
@@ -360,6 +386,7 @@ function ServerTab({ baseUrl, token }: { baseUrl: string; token: string }) {
   -H 'Authorization: Bearer ${tokenForCode}' \\
   -H 'Content-Type: application/json' \\
   -d '{
+    "mode": "hosted",
     "amount": 199.00,
     "currency": "INR",
     "client_order_id": "ORD-1001",
@@ -375,6 +402,7 @@ function ServerTab({ baseUrl, token }: { baseUrl: string; token: string }) {
     'Content-Type': 'application/json',
   },
   body: JSON.stringify({
+    mode: 'hosted',
     amount: 199,
     currency: 'INR',
     client_order_id: 'ORD-1001',
@@ -392,6 +420,7 @@ r = requests.post(
     '${baseUrl}/create-order',
     headers={'Authorization': 'Bearer ${tokenForCode}'},
     json={
+        'mode': 'hosted',
         'amount': 199,
         'currency': 'INR',
         'client_order_id': 'ORD-1001',
@@ -412,6 +441,7 @@ curl_setopt($ch, CURLOPT_HTTPHEADER, [
   'Content-Type: application/json',
 ]);
 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
+  'mode' => 'hosted',
   'amount' => 199,
   'currency' => 'INR',
   'client_order_id' => 'ORD-1001',
@@ -514,6 +544,7 @@ Content-Type: application/json`}</Code>
           <table className="gw-params">
             <thead><tr><th>Field</th><th>Type</th><th>Req</th><th>Description</th></tr></thead>
             <tbody>
+              <tr><td>mode</td><td>string</td><td>yes</td><td><code>hosted</code> (redirect to our pay page) or <code>server</code> (your UI renders the QR/UPI link)</td></tr>
               <tr><td>amount</td><td>number</td><td>yes</td><td>INR amount, e.g. 199.00</td></tr>
               <tr><td>currency</td><td>string</td><td>no</td><td>Default INR</td></tr>
               <tr><td>client_order_id</td><td>string</td><td>no</td><td>Your unique order id</td></tr>
@@ -825,7 +856,9 @@ return res.json({
    TestConsole — kept identical in behavior
    ============================================================ */
 
-function TestConsole({ apiToken, baseUrl }: { apiToken: string; baseUrl: string }) {
+function TestConsole({ apiToken, baseUrl, canServer, canHosted }: { apiToken: string; baseUrl: string; canServer: boolean; canHosted: boolean }) {
+  const defaultMode = canHosted ? 'hosted' : (canServer ? 'server' : 'hosted');
+  const [mode, setMode] = useState<'hosted' | 'server'>(defaultMode);
   const [amount, setAmount] = useState('1.00');
   const [currency, setCurrency] = useState('INR');
   const [clientOrderId, setClientOrderId] = useState(randomOrderId());
@@ -846,6 +879,7 @@ function TestConsole({ apiToken, baseUrl }: { apiToken: string; baseUrl: string 
   const runCreate = async () => {
     setCreateBusy(true); setCreateOut(null);
     const body: any = {
+      mode,
       amount: parseFloat(amount),
       currency: currency.trim().toUpperCase() || 'INR',
     };
@@ -902,6 +936,16 @@ function TestConsole({ apiToken, baseUrl }: { apiToken: string; baseUrl: string 
         <summary>Create test order</summary>
         <div className="gw-acc-body">
           <div className="gw-form">
+            <label className="gw-field">
+              <span>Mode <span className="gw-required">*</span></span>
+              <div className="gw-select-wrap">
+                <select value={mode} onChange={(e) => setMode(e.target.value as any)}>
+                  <option value="hosted" disabled={!canHosted}>hosted — return payment_page_url</option>
+                  <option value="server" disabled={!canServer}>server — return upi_payload + qr_image_url</option>
+                </select>
+              </div>
+              <div className="gw-field-hint">Use <code>hosted</code> if your customer should be redirected to our pay page; <code>server</code> if you render your own UI.</div>
+            </label>
             <label className="gw-field">
               <span>Amount (INR) <span className="gw-required">*</span></span>
               <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="1.00" />

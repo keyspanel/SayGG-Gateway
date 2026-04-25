@@ -5,6 +5,7 @@ import pool from './db';
 import { gwSession, GwSessionRequest, signGwToken } from './auth-mw';
 import { apiError, apiSuccess, methodNotAllowed } from './api-response';
 import { rateLimit, clientIp } from './rate-limit';
+import { getEffectiveAccess, isOwner } from './authz';
 
 const router = express.Router();
 
@@ -184,11 +185,32 @@ router.post('/login', loginLimiterIp, async (req, res) => {
 
 router.get('/me', gwSession, async (req: GwSessionRequest, res: Response) => {
   const u = req.gwUser!;
-  apiSuccess(res, 'Session loaded', { id: u.id, username: u.username, email: u.email, has_token: !!u.api_token });
+  const eff = await getEffectiveAccess(u);
+  apiSuccess(res, 'Session loaded', {
+    id: u.id,
+    username: u.username,
+    email: u.email,
+    has_token: !!u.api_token,
+    role: u.role,
+    is_owner: eff.is_owner,
+    access: eff.access,
+    active_subscription: eff.active_subscription,
+  });
 });
 
 async function generateOrRegenerate(req: GwSessionRequest, res: Response) {
-  const userId = req.gwUser!.id;
+  const user = req.gwUser!;
+  const userId = user.id;
+
+  // Plan gate (owner exempt). Normal users must have an active subscription
+  // before they can mint or rotate an API token.
+  if (!isOwner(user)) {
+    const eff = await getEffectiveAccess(user);
+    if (!eff.active_subscription) {
+      return apiError(res, 402, 'Choose a plan to continue.', 'PLAN_REQUIRED');
+    }
+  }
+
   const s = await pool.query(
     'SELECT paytm_upi_id, paytm_merchant_id, paytm_merchant_key, is_active FROM gw_settings WHERE user_id=$1',
     [userId],
