@@ -699,28 +699,59 @@ function CountUpAmount({ value, duration = 950 }: { value: number; duration?: nu
  * confirmation without movement.
  */
 function PaidStatusVisual({ order }: { order: PayOrder }) {
-  // 8 evenly-spaced spark angles around the disc.
-  const sparkCount = 8;
+  // Confetti burst — 14 pieces with 3 shapes & a refined palette so the
+  // celebration reads as premium, not loud. Each piece has its own angle,
+  // distance, rotation, delay and duration so the burst feels organic
+  // instead of mechanically symmetrical.
+  const palette = [
+    '#10b981', '#34d399', '#6ee7b7',
+    '#fbbf24', '#60a5fa', '#f472b6', '#a78bfa',
+  ];
+  const confettiCount = 14;
+  const confettiPieces = Array.from({ length: confettiCount }).map((_, i) => {
+    const baseAngle = (360 / confettiCount) * i;
+    // Tilt every other piece slightly so the burst doesn't feel too even.
+    const angle = baseAngle + (i % 2 === 0 ? 8 : -6);
+    return {
+      angle,
+      color: palette[i % palette.length],
+      distance: 95 + (i % 5) * 22,            // 95 – 183 px
+      delay: 60 + (i % 7) * 30,               // 60 – 240 ms
+      rotation: (i % 2 === 0 ? 1 : -1) * (220 + ((i * 47) % 260)),
+      duration: 1100 + (i % 4) * 140,         // 1100 – 1520 ms
+      size: 6 + (i % 3) * 2,                  //  6 / 8 / 10 px
+      shape: i % 3,                           // 0 sq · 1 rounded · 2 dot
+    };
+  });
+
   return (
     <div className="pp-paid" role="status" aria-live="polite" aria-label="Payment received">
       <div className="pp-paid-stage" aria-hidden="true">
         <span className="pp-paid-aurora" />
+        <span className="pp-paid-aurora pp-paid-aurora--alt" />
+        <span className="pp-paid-glow-ring" />
         <span className="pp-paid-ring pp-paid-ring--1" />
         <span className="pp-paid-ring pp-paid-ring--2" />
         <span className="pp-paid-ring pp-paid-ring--3" />
         <span className="pp-paid-disc">
-          <svg className="pp-paid-check" viewBox="0 0 52 52" width="44" height="44">
-            <circle className="pp-paid-check-ring" cx="26" cy="26" r="22" />
-            <path className="pp-paid-check-tick" d="M14.5 27 L22.5 35 L38.5 18.5" />
+          <span className="pp-paid-disc-shine" />
+          <svg className="pp-paid-check" viewBox="0 0 60 60" width="56" height="56">
+            <circle className="pp-paid-check-ring" cx="30" cy="30" r="25.5" />
+            <path className="pp-paid-check-tick" d="M17 31 L26.5 41 L44 22" />
           </svg>
         </span>
-        {Array.from({ length: sparkCount }).map((_, i) => (
+        {confettiPieces.map((c, i) => (
           <span
             key={i}
-            className="pp-paid-spark"
+            className={`pp-paid-confetti pp-paid-confetti--s${c.shape}`}
             style={{
-              ['--a' as string]: `${(360 / sparkCount) * i}deg`,
-              ['--d' as string]: String(i),
+              ['--a' as string]: `${c.angle}deg`,
+              ['--dist' as string]: `${c.distance}px`,
+              ['--rot' as string]: `${c.rotation}deg`,
+              ['--dur' as string]: `${c.duration}ms`,
+              ['--delay' as string]: `${c.delay}ms`,
+              ['--size' as string]: `${c.size}px`,
+              background: c.color,
             }}
           />
         ))}
@@ -731,8 +762,15 @@ function PaidStatusVisual({ order }: { order: PayOrder }) {
         <span className="pp-paid-amount-val"><CountUpAmount value={order.amount} /></span>
         <span className="pp-paid-amount-tag">confirmed</span>
       </p>
-      {order.bank_rrn && (
-        <p className="pp-paid-rrn">Bank RRN <code>{order.bank_rrn}</code></p>
+      {order.verified_at && (
+        <p className="pp-paid-meta">
+          Confirmed at {new Date(order.verified_at).toLocaleString(undefined, {
+            hour: 'numeric',
+            minute: '2-digit',
+            day: '2-digit',
+            month: 'short',
+          })}
+        </p>
       )}
     </div>
   );
@@ -1462,32 +1500,10 @@ export default function PayPage() {
       {order.is_terminal && (
         <div className="pp-card pp-result">
           <StatusVisual order={order} />
-          <div className="pp-meta-row pp-meta-row--list">
-            <div className="pp-meta-item">
-              <b>Order ID</b>
-              <div className="pp-meta-val">
-                <span className="pp-meta-mono">{orderRefId}</span>
-                <CopyButton value={orderRefId} label="Order ID" />
-              </div>
-            </div>
-            <div className="pp-meta-item">
-              <b>Ref</b>
-              <div className="pp-meta-val">
-                <span className="pp-meta-mono">{order.txn_ref}</span>
-                <CopyButton value={order.txn_ref} label="Reference" />
-              </div>
-            </div>
-            <div className="pp-meta-item">
-              <b>Amount</b>
-              <div className="pp-meta-val"><span>₹{order.amount.toFixed(2)}</span></div>
-            </div>
-            {order.verified_at && (
-              <div className="pp-meta-item">
-                <b>Confirmed</b>
-                <div className="pp-meta-val"><span>{new Date(order.verified_at).toLocaleString()}</span></div>
-              </div>
-            )}
-          </div>
+          {/* Order ID / Note / Ref are intentionally NOT repeated here —
+              they live in the always-visible summary card above so we have
+              a single, stable receipt-style block that doesn't duplicate
+              metadata across two places. */}
           {/* Auto-redirect after the backend confirms the order is terminal
               and the matching merchant URL was set on create-order:
                 - paid              → redirect_url

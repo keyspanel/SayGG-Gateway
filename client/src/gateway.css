@@ -1893,15 +1893,17 @@ code {
 /* Stage holds every animated element so they all share one center point. */
 .pp-paid-stage {
   position: relative;
-  width: 148px;
-  height: 148px;
+  width: 168px;
+  height: 168px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 4px 0 6px;
+  margin: 6px 0 10px;
 }
 
-/* Soft blurred radial halo behind the disc. Scales in once, then breathes. */
+/* Two-layer aurora — the base radial halo plus a slowly rotating conic
+   layer underneath. Together they read as a soft, lit "atmosphere" behind
+   the disc instead of a flat green wash. */
 .pp-paid-aurora {
   position: absolute;
   inset: -22%;
@@ -1918,6 +1920,22 @@ code {
     pp-paid-aurora-in 760ms cubic-bezier(.2,.8,.2,1) 60ms both,
     pp-paid-aurora-breathe 4.4s ease-in-out 980ms infinite;
 }
+.pp-paid-aurora--alt {
+  inset: -28%;
+  background: conic-gradient(from 0deg,
+    rgba(var(--pp-paid-green-rgb), 0)    0%,
+    rgba(var(--pp-paid-green-rgb), 0.40) 18%,
+    rgba(var(--pp-paid-green-rgb), 0)    36%,
+    rgba(99, 102, 241, 0.22)             52%,
+    rgba(var(--pp-paid-green-rgb), 0)    70%,
+    rgba(var(--pp-paid-green-rgb), 0.32) 84%,
+    rgba(var(--pp-paid-green-rgb), 0)    100%);
+  filter: blur(34px);
+  z-index: -3;
+  animation:
+    pp-paid-aurora-in 900ms cubic-bezier(.2,.8,.2,1) 120ms both,
+    pp-paid-aurora-spin 14s linear 900ms infinite;
+}
 @keyframes pp-paid-aurora-in {
   0%   { opacity: 0; transform: scale(0.55); filter: blur(40px); }
   100% { opacity: 1; transform: scale(1);    filter: blur(28px); }
@@ -1925,6 +1943,36 @@ code {
 @keyframes pp-paid-aurora-breathe {
   0%, 100% { transform: scale(1);    opacity: 0.95; }
   50%      { transform: scale(1.08); opacity: 1; }
+}
+@keyframes pp-paid-aurora-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Soft outer glow ring that frames the disc and gently pulses — adds the
+   "lit from within" feel without resorting to a heavy box-shadow. */
+.pp-paid-glow-ring {
+  position: absolute;
+  width: 156px;
+  height: 156px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side,
+    transparent 56%,
+    rgba(var(--pp-paid-green-rgb), 0.38) 70%,
+    rgba(var(--pp-paid-green-rgb), 0)    96%);
+  filter: blur(6px);
+  opacity: 0;
+  transform: scale(0.78);
+  z-index: -1;
+  animation:
+    pp-paid-glow-ring-in 720ms cubic-bezier(.2, .8, .2, 1) 180ms forwards,
+    pp-paid-glow-ring-pulse 3s ease-in-out 1100ms infinite;
+}
+@keyframes pp-paid-glow-ring-in {
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes pp-paid-glow-ring-pulse {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  50%      { opacity: 1;    transform: scale(1.06); }
 }
 
 /* Sonar ripple rings — three staggered loops so it feels alive. */
@@ -1955,55 +2003,96 @@ code {
    initial entrance to keep it feeling "live" without being noisy. */
 .pp-paid-disc {
   position: relative;
-  width: 88px;
-  height: 88px;
+  width: 104px;
+  height: 104px;
   border-radius: 50%;
   background:
-    radial-gradient(circle at 30% 25%, rgba(255,255,255,0.35), rgba(255,255,255,0) 55%),
+    radial-gradient(circle at 30% 25%, rgba(255,255,255,0.42), rgba(255,255,255,0) 55%),
     linear-gradient(135deg, var(--pp-paid-green-hi) 0%, var(--pp-paid-green) 45%, var(--pp-paid-green-2) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   color: #fff;
+  overflow: hidden; /* clips the shine sweep to the disc face */
   box-shadow:
-    0 18px 38px -10px rgba(var(--pp-paid-green-rgb), 0.55),
-    0 6px 14px -4px rgba(var(--pp-paid-green-rgb), 0.40),
+    0 22px 44px -12px rgba(var(--pp-paid-green-rgb), 0.60),
+    0 8px 18px -4px  rgba(var(--pp-paid-green-rgb), 0.42),
     inset 0 -2px 6px rgba(0,0,0,0.18),
-    inset 0 2px 3px rgba(255,255,255,0.40);
+    inset 0 2px 3px rgba(255,255,255,0.42);
   transform: scale(0) rotate(-22deg);
   opacity: 0;
   filter: blur(10px);
   animation:
-    pp-paid-disc-in 720ms cubic-bezier(.18, 1.18, .35, 1.05) 100ms forwards,
+    pp-paid-disc-in 760ms cubic-bezier(.18, 1.22, .35, 1.04) 100ms forwards,
     pp-paid-disc-glow 2.8s ease-in-out 1200ms infinite;
 }
 @keyframes pp-paid-disc-in {
   0%   { transform: scale(0)    rotate(-22deg); opacity: 0; filter: blur(10px); }
-  55%  { transform: scale(1.12) rotate(-3deg);  opacity: 1; filter: blur(0); }
+  55%  { transform: scale(1.14) rotate(-3deg);  opacity: 1; filter: blur(0); }
   78%  { transform: scale(0.95) rotate(0deg); }
   100% { transform: scale(1)    rotate(0deg);   opacity: 1; filter: blur(0); }
 }
 @keyframes pp-paid-disc-glow {
   0%, 100% {
     box-shadow:
-      0 18px 38px -10px rgba(var(--pp-paid-green-rgb), 0.55),
-      0 6px 14px -4px rgba(var(--pp-paid-green-rgb), 0.40),
+      0 22px 44px -12px rgba(var(--pp-paid-green-rgb), 0.60),
+      0 8px 18px -4px  rgba(var(--pp-paid-green-rgb), 0.42),
       inset 0 -2px 6px rgba(0,0,0,0.18),
-      inset 0 2px 3px rgba(255,255,255,0.40);
+      inset 0 2px 3px rgba(255,255,255,0.42);
   }
   50% {
     box-shadow:
-      0 24px 50px -8px rgba(var(--pp-paid-green-rgb), 0.70),
-      0 8px 20px -2px rgba(var(--pp-paid-green-rgb), 0.50),
+      0 28px 56px -10px rgba(var(--pp-paid-green-rgb), 0.74),
+      0 10px 24px -2px  rgba(var(--pp-paid-green-rgb), 0.52),
       inset 0 -2px 6px rgba(0,0,0,0.18),
-      inset 0 2px 3px rgba(255,255,255,0.40);
+      inset 0 2px 3px rgba(255,255,255,0.42);
   }
+}
+
+/* Specular shine that sweeps across the disc face after it lands.
+   Sits inside the disc (which is overflow:hidden) so the gradient is
+   clipped to the disc's circular shape. */
+.pp-paid-disc-shine {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0;
+  animation: pp-paid-disc-shine-on 1ms 880ms forwards;
+}
+.pp-paid-disc-shine::before {
+  content: '';
+  position: absolute;
+  top: -25%;
+  left: -120%;
+  width: 60%;
+  height: 150%;
+  background: linear-gradient(115deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.55) 50%,
+    transparent 70%);
+  transform: translateX(0) skewX(-22deg);
+  animation: pp-paid-disc-shine-sweep 1100ms cubic-bezier(.4, 0, .2, 1) 880ms;
+}
+@keyframes pp-paid-disc-shine-on {
+  to { opacity: 1; }
+}
+@keyframes pp-paid-disc-shine-sweep {
+  0%   { transform: translateX(0)    skewX(-22deg); }
+  100% { transform: translateX(420%) skewX(-22deg); }
 }
 
 /* Checkmark draws in two beats: ring traces around the disc, then the
    tick itself draws on top. Lengths picked to match the SVG arcs/path
-   so dashoffset goes 0 by the end of each animation. */
-.pp-paid-check { display: block; overflow: visible; }
+   (r=25.5 → C ≈ 160, plus a little headroom) so dashoffset goes 0 by
+   the end of each animation. */
+.pp-paid-check {
+  display: block;
+  overflow: visible;
+  position: relative;
+  z-index: 1; /* keep the checkmark above the shine sweep */
+}
 .pp-paid-check-ring,
 .pp-paid-check-tick {
   fill: none;
@@ -2013,54 +2102,66 @@ code {
 }
 .pp-paid-check-ring {
   stroke-width: 3;
-  stroke-dasharray: 145;
-  stroke-dashoffset: 145;
+  stroke-dasharray: 165;
+  stroke-dashoffset: 165;
   opacity: 0.92;
-  animation: pp-paid-draw 460ms cubic-bezier(.4, 0, .2, 1) 380ms forwards;
-  transform-origin: 26px 26px;
+  animation: pp-paid-draw 480ms cubic-bezier(.4, 0, .2, 1) 380ms forwards;
+  transform-origin: 30px 30px;
   transform: rotate(-90deg); /* start the trace at 12 o'clock */
 }
 .pp-paid-check-tick {
-  stroke-width: 4;
-  stroke-dasharray: 40;
-  stroke-dashoffset: 40;
-  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.15));
-  animation: pp-paid-draw 360ms cubic-bezier(.65, .05, .36, 1) 740ms forwards;
+  stroke-width: 4.4;
+  stroke-dasharray: 46;
+  stroke-dashoffset: 46;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.18));
+  animation: pp-paid-draw 380ms cubic-bezier(.65, .05, .36, 1) 760ms forwards;
 }
 @keyframes pp-paid-draw {
   to { stroke-dashoffset: 0; }
 }
 
-/* Sparks fly out radially from the center. Each spark uses --a as the
-   angle and --d as a 0-based index for a tiny stagger. transform-origin
-   stays at the spark's own center; rotate-then-translate sends it
-   outward along its rotated X axis. */
-.pp-paid-spark {
+/* Confetti burst — colored pieces fly outward radially from the disc's
+   center, spinning on their own axis as they go. Three shape variants
+   (square / pill / dot) make the burst feel organic. Per-piece
+   variables (--a, --dist, --rot, --dur, --delay, --size) come from
+   React so we get random-feel motion without runtime randomness. */
+.pp-paid-confetti {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 7px;
-  height: 7px;
-  margin: -3.5px 0 0 -3.5px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #ecfdf5, var(--pp-paid-green) 70%);
-  opacity: 0;
+  width:  var(--size, 7px);
+  height: var(--size, 7px);
+  margin: calc(var(--size, 7px) / -2) 0 0 calc(var(--size, 7px) / -2);
+  border-radius: 1.5px;
   pointer-events: none;
-  transform: rotate(var(--a, 0deg)) translateX(0) scale(0.4);
-  filter: blur(2px);
-  animation: pp-paid-spark 1100ms cubic-bezier(.2, .65, .25, 1) calc(820ms + (var(--d, 0) * 45ms)) forwards;
+  opacity: 0;
+  transform-origin: center;
+  transform: rotate(var(--a, 0deg)) translateX(0) rotate(0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.10);
+  animation: pp-paid-confetti-burst var(--dur, 1200ms) cubic-bezier(.18, .62, .25, 1) var(--delay, 0ms) forwards;
 }
-@keyframes pp-paid-spark {
-  0%   { opacity: 0;    transform: rotate(var(--a, 0deg)) translateX(18px) scale(0.4); filter: blur(3px); }
-  18%  { opacity: 1;    filter: blur(0.5px); }
-  60%  { opacity: 0.85; }
-  100% { opacity: 0;    transform: rotate(var(--a, 0deg)) translateX(82px) scale(0.2); filter: blur(2.5px); }
+.pp-paid-confetti--s1 { border-radius: 50% 0 50% 0; }
+.pp-paid-confetti--s2 { border-radius: 50%; }
+@keyframes pp-paid-confetti-burst {
+  0%   {
+    opacity: 0;
+    transform: rotate(var(--a, 0deg)) translateX(0) rotate(0deg) scale(0.4);
+  }
+  10%  { opacity: 1; }
+  60%  {
+    opacity: 1;
+    transform: rotate(var(--a, 0deg)) translateX(calc(var(--dist, 100px) * 0.85)) rotate(calc(var(--rot, 180deg) * 0.7)) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(var(--a, 0deg)) translateX(var(--dist, 100px)) rotate(var(--rot, 180deg)) scale(0.85);
+  }
 }
 
 /* Frosted-glass text reveals: each line slides up + sharpens from blur. */
 .pp-paid-title,
 .pp-paid-amount,
-.pp-paid-rrn {
+.pp-paid-meta {
   opacity: 0;
   filter: blur(8px);
   transform: translateY(8px);
@@ -2068,20 +2169,20 @@ code {
 }
 .pp-paid-title  { animation-delay: 720ms; }
 .pp-paid-amount { animation-delay: 840ms; }
-.pp-paid-rrn    { animation-delay: 960ms; }
+.pp-paid-meta   { animation-delay: 960ms; }
 @keyframes pp-paid-text-in {
   to { opacity: 1; filter: blur(0); transform: translateY(0); }
 }
 
 .pp-paid-title {
   margin: 0;
-  font-size: 19px;
+  font-size: 21px;
   font-weight: 700;
-  letter-spacing: -0.012em;
+  letter-spacing: -0.014em;
   color: var(--gw-text);
 }
 .pp-paid-amount {
-  margin: 6px 0 2px;
+  margin: 8px 0 4px;
   display: inline-flex;
   align-items: baseline;
   gap: 4px;
@@ -2089,19 +2190,19 @@ code {
   font-feature-settings: "tnum" 1;
 }
 .pp-paid-amount-cur {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 600;
   color: var(--gw-text-mute);
 }
 .pp-paid-amount-val {
-  font-size: 28px;
+  font-size: 34px;
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.022em;
   color: var(--gw-text);
   line-height: 1;
 }
 .pp-paid-amount-tag {
-  margin-left: 6px;
+  margin-left: 8px;
   align-self: center;
   font-size: 11px;
   font-weight: 600;
@@ -2113,44 +2214,45 @@ code {
   background: rgba(var(--pp-paid-green-rgb), 0.12);
   border: 1px solid rgba(var(--pp-paid-green-rgb), 0.25);
 }
-.pp-paid-rrn {
-  margin: 4px 0 0;
-  font-size: 11.5px;
+.pp-paid-meta {
+  margin: 6px 0 0;
+  font-size: 12px;
   color: var(--gw-text-mute);
-}
-.pp-paid-rrn code {
-  background: var(--gw-bg-2);
-  padding: 2px 6px;
-  border-radius: 5px;
-  font-size: 11px;
-  border: 1px solid var(--gw-border);
+  letter-spacing: 0.005em;
 }
 
 @media (max-width: 380px) {
-  .pp-paid-stage { width: 132px; height: 132px; }
-  .pp-paid-disc  { width: 80px;  height: 80px; }
-  .pp-paid-ring  { width: 84px;  height: 84px; }
-  .pp-paid-amount-val { font-size: 26px; }
+  .pp-paid-stage      { width: 144px; height: 144px; }
+  .pp-paid-disc       { width: 92px;  height: 92px; }
+  .pp-paid-ring       { width: 88px;  height: 88px; }
+  .pp-paid-glow-ring  { width: 134px; height: 134px; }
+  .pp-paid-amount-val { font-size: 30px; }
+  .pp-paid-amount-cur { font-size: 20px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   /* Show the celebrated end-state without any motion or loops. */
   .pp-paid-aurora,
+  .pp-paid-glow-ring,
   .pp-paid-ring,
   .pp-paid-disc,
-  .pp-paid-spark,
+  .pp-paid-disc-shine,
+  .pp-paid-disc-shine::before,
+  .pp-paid-confetti,
   .pp-paid-title,
   .pp-paid-amount,
-  .pp-paid-rrn { animation: none !important; }
-  .pp-paid-aurora { opacity: 1; transform: scale(1); filter: blur(28px); }
-  .pp-paid-ring   { display: none; }
-  .pp-paid-disc   { opacity: 1; transform: none; filter: none; }
+  .pp-paid-meta { animation: none !important; }
+  .pp-paid-aurora    { opacity: 1; transform: scale(1); filter: blur(28px); }
+  .pp-paid-glow-ring { opacity: 1; transform: scale(1); }
+  .pp-paid-ring      { display: none; }
+  .pp-paid-disc      { opacity: 1; transform: none; filter: none; }
+  .pp-paid-disc-shine { display: none; }
   .pp-paid-check-ring,
   .pp-paid-check-tick { stroke-dashoffset: 0 !important; animation: none !important; }
-  .pp-paid-spark  { display: none; }
+  .pp-paid-confetti  { display: none; }
   .pp-paid-title,
   .pp-paid-amount,
-  .pp-paid-rrn { opacity: 1; filter: none; transform: none; }
+  .pp-paid-meta      { opacity: 1; filter: none; transform: none; }
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
