@@ -201,22 +201,61 @@ router.get('/:token/stream', tokenGuard, sseConnectLimiter, async (req: Request,
   res.on('close', cleanup);
 });
 
+/**
+ * Sizes allowed for the public QR PNG endpoint. Plain black-and-white QRs
+ * with high error correction so the downloaded image stays scannable on
+ * print, projection, and screen.
+ *
+ * 4K (4096) is supported but falls back to 2K if rendering fails or runs
+ * out of memory under load — 2K still scans cleanly from a phone.
+ */
+const ALLOWED_QR_SIZES = [512, 1024, 1080, 2048, 4096] as const;
+type QrSize = typeof ALLOWED_QR_SIZES[number];
+const DEFAULT_QR_SIZE: QrSize = 2048;
+const FALLBACK_QR_SIZE: QrSize = 2048;
+
+function pickQrSize(raw: unknown): QrSize {
+  const n = parseInt(String(raw ?? ''), 10);
+  return (ALLOWED_QR_SIZES as readonly number[]).includes(n) ? (n as QrSize) : DEFAULT_QR_SIZE;
+}
+
+async function renderQrPng(payload: string, width: QrSize): Promise<Buffer> {
+  return QRCode.toBuffer(payload, {
+    type: 'png',
+    errorCorrectionLevel: 'H',
+    margin: 4,
+    width,
+    color: { dark: '#000000', light: '#FFFFFF' },
+  });
+}
+
 router.get('/:token/qr.png', tokenGuard, qrLimiter, async (req: Request, res: Response) => {
   try {
     const order = await loadOrderByToken(req.params.token);
     if (!order || !order.upi_payload) {
       return res.status(404).json({ success: false, message: 'QR not available', code: 'QR_NOT_AVAILABLE' });
     }
-    const size = Math.min(Math.max(parseInt(String(req.query.size || '420'), 10) || 420, 160), 800);
-    const buf = await QRCode.toBuffer(order.upi_payload, {
-      type: 'png',
-      errorCorrectionLevel: 'M',
-      margin: 1,
-      width: size,
-      color: { dark: '#0a0a0f', light: '#ffffff' },
-    });
+
+    const requested = pickQrSize(req.query.size);
+    let size: QrSize = requested;
+    let buf: Buffer;
+    try {
+      buf = await renderQrPng(order.upi_payload, size);
+    } catch (renderErr) {
+      // Graceful fallback (e.g. memory pressure at 4K under load).
+      if (size > FALLBACK_QR_SIZE) {
+        console.warn('[pay/qr] high-res render failed, falling back', { requested, fallback: FALLBACK_QR_SIZE, err: (renderErr as Error)?.message });
+        size = FALLBACK_QR_SIZE;
+        buf = await renderQrPng(order.upi_payload, size);
+      } else {
+        throw renderErr;
+      }
+    }
+
+    const safeRef = String(order.txn_ref || order.public_token).replace(/[^A-Za-z0-9_-]/g, '');
     res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Cache-Control', 'public, max-age=300, immutable');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Disposition', `attachment; filename="PayGateway-QR-${safeRef}-${size}.png"`);
     return res.send(buf);
   } catch (e) {
     console.error('[pay/qr]', e);

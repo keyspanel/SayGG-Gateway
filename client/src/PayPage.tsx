@@ -616,6 +616,10 @@ export default function PayPage() {
   const [downloading, setDownloading] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [shareMsg, setShareMsg] = useState<string | null>(null);
+  /** Resolution for the plain HD QR PNG download. 2K is a good default
+   *  that scans cleanly from print and screen and is small enough to
+   *  share on chat apps. */
+  const [downloadSize, setDownloadSize] = useState<1080 | 2048 | 4096>(2048);
   const [live, setLive] = useState<LiveState>('connecting');
 
   const startedAtRef = useRef<number>(Date.now());
@@ -820,7 +824,9 @@ export default function PayPage() {
   const buildQrCardBlob = async (): Promise<{ blob: Blob; orderRefLabel: string }> => {
     if (!order) throw new Error('order missing');
 
-    const qrRes = await fetch(`/api/pay/${order.public_token}/qr.png?size=720`);
+    // Embed a high-resolution QR (1080) in the branded share card so it
+    // stays sharp when downsized by chat apps.
+    const qrRes = await fetch(`/api/pay/${order.public_token}/qr.png?size=1080`);
     const qrBlob = await qrRes.blob();
     const qrUrl = URL.createObjectURL(qrBlob);
     try {
@@ -922,17 +928,24 @@ export default function PayPage() {
   };
 
   /**
-   * Render the branded QR card and trigger a PNG download.
+   * Download a plain high-resolution QR PNG (black on white, generous quiet
+   * zone, error-correction level H) from the public endpoint. Defaults to
+   * 2K. The endpoint sets Content-Disposition so the browser saves it with
+   * a clean filename without us building a synthetic anchor.
    */
-  const downloadQr = async () => {
+  const downloadQr = async (sizeOverride?: 1080 | 2048 | 4096) => {
     if (!order || downloading) return;
+    const size = sizeOverride ?? downloadSize;
     setDownloading(true);
     try {
-      const { blob, orderRefLabel } = await buildQrCardBlob();
+      const res = await fetch(`/api/pay/${order.public_token}/qr.png?size=${size}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `payment-qr-${orderRefLabel}.png`;
+      const refLabel = order.client_order_id || order.txn_ref;
+      a.download = `PayGateway-QR-${refLabel}-${size}.png`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -1136,21 +1149,39 @@ export default function PayPage() {
             <button
               type="button"
               className="pp-btn primary"
-              onClick={downloadQr}
+              onClick={() => void downloadQr()}
               disabled={downloading}
             >
-              {downloading ? 'Preparing…' : 'Download QR Code'}
+              {downloading
+                ? 'Preparing…'
+                : `Download HD QR Code · ${downloadSize === 4096 ? '4K' : downloadSize === 2048 ? '2K' : '1080p'}`}
             </button>
             <button
               type="button"
               className="pp-btn ghost"
-              onClick={shareQr}
+              onClick={() => void shareQr()}
               disabled={sharing}
               aria-label="Share QR via WhatsApp, Telegram, email or another app"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6 }}><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
               {sharing ? 'Opening…' : 'Share QR'}
             </button>
+          </div>
+          <div className="pp-size-row" role="radiogroup" aria-label="Download QR resolution">
+            <span className="pp-size-label">Resolution:</span>
+            {([1080, 2048, 4096] as const).map((sz) => (
+              <button
+                key={sz}
+                type="button"
+                role="radio"
+                aria-checked={downloadSize === sz}
+                className={`pp-size-pill${downloadSize === sz ? ' is-active' : ''}`}
+                onClick={() => setDownloadSize(sz)}
+                disabled={downloading}
+              >
+                {sz === 4096 ? '4K' : sz === 2048 ? '2K' : '1080p'}
+              </button>
+            ))}
           </div>
           {shareMsg && <div className="pp-share-toast" role="status">{shareMsg}</div>}
           <div className="pp-poll-row">

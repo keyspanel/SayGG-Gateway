@@ -698,8 +698,13 @@ function HostedPageTab() {
               <li><code>GET /pay/:public_token</code> — hosted page</li>
               <li><code>GET /api/pay/:public_token</code> — JSON snapshot</li>
               <li><code>POST /api/pay/:public_token/refresh</code> — re-verify with Paytm</li>
-              <li><code>GET /api/pay/:public_token/qr.png</code> — QR PNG</li>
+              <li><code>GET /api/pay/:public_token/qr.png?size=2048</code> — HD QR PNG</li>
             </ul>
+            <p className="gw-muted" style={{ marginTop: 8, fontSize: 12 }}>
+              QR sizes: <code>512</code>, <code>1024</code>, <code>1080</code>, <code>2048</code> (default), <code>4096</code>.
+              Plain black-and-white PNG, error-correction level H, large quiet zone — sharp and scannable on print and screen.
+              Invalid sizes fall back to 2048.
+            </p>
           </div>
         </details>
 
