@@ -1322,11 +1322,26 @@ code {
 .pp-shell > * { width: min(520px, 100%); margin: 0 auto; }
 
 .pp-loading {
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
   color: var(--gw-text-mute);
-  padding: 56px 0;
+  padding: 80px 0;
   font-size: 13.5px;
+  min-height: 60vh;
 }
+.pp-loading-spinner {
+  width: 26px;
+  height: 26px;
+  border: 2px solid var(--gw-border);
+  border-top-color: var(--gw-primary, #4f46e5);
+  border-radius: 50%;
+  animation: pp-spin 0.8s linear infinite;
+}
+@keyframes pp-spin { to { transform: rotate(360deg); } }
+.pp-shell--boot { background: var(--gw-bg); }
 
 .pp-top {
   display: flex;

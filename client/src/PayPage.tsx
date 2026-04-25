@@ -795,38 +795,16 @@ export default function PayPage() {
     };
   }, [token, refreshOnce, applySnapshot]);
 
-  if (loading) {
-    return (
-      <div className="pp-shell">
-        <div className="pp-loading">Loading…</div>
-      </div>
-    );
-  }
-
-  if (error || !order) {
-    return (
-      <div className="pp-shell">
-        <div className="pp-card pp-notfound">
-          <div className="pp-brand-row">
-            <div className="pp-brand-mark">PG</div>
-            <div className="pp-brand-name">PayGateway</div>
-          </div>
-          <h2>Link not found</h2>
-          <p>{error || 'This payment link is invalid or removed.'}</p>
-          <p className="pp-meta">Request a fresh link from the merchant.</p>
-        </div>
-      </div>
-    );
-  }
-
-  const expiresMs = order.expires_at ? new Date(order.expires_at).getTime() - now : 0;
-  const showCountdown = order.status === 'pending' && order.expires_at && expiresMs > 0;
-
   /**
-   * Pre-fetch the QR PNG and decode it the moment the order is ready, so
-   * that when the user taps Download / Share the canvas can be drawn
-   * synchronously with no network or decode latency. Cached card blob is
-   * also reset whenever the order's public_token changes.
+   * Pre-fetch the QR PNG and decode it the moment the order's public_token
+   * is known, so that when the user taps Download / Share the canvas can be
+   * drawn synchronously with no network or decode latency. Cached card blob
+   * is also reset whenever the order's public_token changes.
+   *
+   * NOTE: This hook MUST be declared above the early-return branches below
+   * (loading / error). Hooks must run in the same order on every render —
+   * placing it after the returns would change the hook count once `loading`
+   * flips false and React would crash or briefly blank the page.
    */
   useEffect(() => {
     const tk = order?.public_token;
@@ -852,6 +830,36 @@ export default function PayPage() {
       throw e;
     });
   }, [order?.public_token]);
+
+  if (loading) {
+    return (
+      <div className="pp-shell pp-shell--boot">
+        <div className="pp-loading" role="status" aria-live="polite">
+          <div className="pp-loading-spinner" aria-hidden="true" />
+          <span>Loading payment…</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !order) {
+    return (
+      <div className="pp-shell">
+        <div className="pp-card pp-notfound">
+          <div className="pp-brand-row">
+            <div className="pp-brand-mark">PG</div>
+            <div className="pp-brand-name">PayGateway</div>
+          </div>
+          <h2>Link not found</h2>
+          <p>{error || 'This payment link is invalid or removed.'}</p>
+          <p className="pp-meta">Request a fresh link from the merchant.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const expiresMs = order.expires_at ? new Date(order.expires_at).getTime() - now : 0;
+  const showCountdown = order.status === 'pending' && order.expires_at && expiresMs > 0;
 
   /**
    * Render the branded QR receipt card to a canvas and return it as a JPEG
