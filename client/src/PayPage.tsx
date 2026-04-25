@@ -1128,7 +1128,26 @@ export default function PayPage() {
     // Better text rendering hints when supported.
     (ctx as any).textRendering = 'geometricPrecision';
 
-      const FONT_STACK = '"Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+    const FONT_STACK = '"Inter", "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+
+    // Make absolutely sure Inter is loaded BEFORE we draw a single
+    // glyph onto the canvas — otherwise the browser silently falls back
+    // to a system serif/sans, which is what made the rendered card text
+    // look unpolished. We request every weight we'll actually paint
+    // (900 / 800 / 700 / 600 / 500) so each ctx.fillText below hits a
+    // properly-loaded face. The whole load is bounded by a soft
+    // timeout so a slow/blocked CDN can never freeze the download.
+    await Promise.race([
+      Promise.all([
+        (document as any).fonts?.load?.('900 96px "Inter"'),
+        (document as any).fonts?.load?.('800 60px "Inter"'),
+        (document as any).fonts?.load?.('700 30px "Inter"'),
+        (document as any).fonts?.load?.('600 28px "Inter"'),
+        (document as any).fonts?.load?.('500 24px "Inter"'),
+        (document as any).fonts?.ready,
+      ].filter(Boolean)),
+      new Promise((r) => setTimeout(r, 1500)),
+    ]).catch(() => { /* fall back to FONT_STACK's next family */ });
 
       // Background
       ctx.fillStyle = '#ffffff';
@@ -1147,10 +1166,14 @@ export default function PayPage() {
       ctx.fillStyle = '#cfd2dc';
       ctx.fillText('PayGateway · Secure UPI', 134, 90);
 
-      // Merchant name
+      // Merchant / display name — heaviest weight Inter ships with so
+      // it reads as the headline of the receipt-style card. Tight
+      // letter-spacing approximated by reducing the px size slightly
+      // and using the 800 weight (Canvas2D has no letterSpacing prior
+      // to recent Chrome, so we keep this stable across browsers).
       ctx.fillStyle = '#0a0a0f';
       ctx.textBaseline = 'top';
-      ctx.font = `800 60px ${FONT_STACK}`;
+      ctx.font = `900 60px ${FONT_STACK}`;
       ctx.fillText(order.payee_name || 'Merchant', 64, 226);
 
       // Subtitle

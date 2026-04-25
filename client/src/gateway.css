@@ -1,4 +1,11 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+/* Inter is the fintech-grade workhorse used by Stripe / Linear / Vercel —
+   loaded alongside Plus Jakarta Sans (kept as the body face) so the
+   "Payment received" headline and the canvas-rendered QR card both have
+   access to a stable, professional, hinted geometric sans. The same
+   stylesheet is also <link>ed in client/index.html with rel="preconnect"
+   so the woff2s start downloading on first paint and we avoid any FOUT
+   on the success card. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
 /* ============================================
    PayGateway — light-default, dark optional.
@@ -2175,19 +2182,33 @@ code {
 }
 
 .pp-paid-title {
+  /* Inter at 800 with the "ss01" stylistic set + cv11 (single-storey g)
+     gives the headline that crisp, geometric, fintech feel — same family
+     Stripe / Linear / Vercel use for receipts. font-display is `swap` on
+     the Google Fonts link so the page is never blocked waiting for it. */
   margin: 0;
-  font-size: 21px;
-  font-weight: 700;
-  letter-spacing: -0.014em;
+  font-family: 'Inter', 'Plus Jakarta Sans', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.022em;
+  line-height: 1.15;
   color: var(--gw-text);
+  font-feature-settings: "ss01" 1, "cv11" 1, "calt" 1;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 .pp-paid-amount {
-  margin: 8px 0 4px;
+  margin: 10px 0 4px;
   display: inline-flex;
   align-items: baseline;
   gap: 4px;
   color: var(--gw-text);
-  font-feature-settings: "tnum" 1;
+  font-family: 'Inter', 'Plus Jakarta Sans', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Tabular nums + slashed zero so the count-up doesn't jitter as digits
+     change width and the amount feels engineered, not typed. */
+  font-feature-settings: "tnum" 1, "zero" 1, "ss01" 1;
+  font-variant-numeric: tabular-nums;
 }
 .pp-paid-amount-cur {
   font-size: 22px;
@@ -2195,9 +2216,9 @@ code {
   color: var(--gw-text-mute);
 }
 .pp-paid-amount-val {
-  font-size: 34px;
+  font-size: 36px;
   font-weight: 800;
-  letter-spacing: -0.022em;
+  letter-spacing: -0.026em;
   color: var(--gw-text);
   line-height: 1;
 }

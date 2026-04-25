@@ -6,6 +6,21 @@
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0b0b0f" media="(prefers-color-scheme: dark)" />
     <title>PayGateway</title>
+    <!-- Pre-connect to the Google Fonts hosts so the Inter / Plus Jakarta Sans
+         CSS + woff2 files start downloading on the very first paint. This
+         removes the brief FOUT that would otherwise be visible on the
+         "Payment received" headline and on the canvas-rendered QR card. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+    />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+    />
     <script>
       (function () {
         try {
@@ -46,8 +61,8 @@
       }
       @keyframes gw-spin { to { transform: rotate(360deg); } }
     </style>
-    <script type="module" crossorigin src="/assets/index-bXQNDqi3.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DA0pYex_.css">
+    <script type="module" crossorigin src="/assets/index-D0youiOI.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-Dc7S8HdT.css">
   </head>
   <body>
     <div id="root"><div class="gw-boot"></div></div>
