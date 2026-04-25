@@ -646,21 +646,101 @@ function CopyButton({ value, label }: { value: string; label: string }) {
   );
 }
 
+/**
+ * CountUpAmount
+ *
+ * Animates a numeric value from 0 → `value` over `duration` ms using
+ * requestAnimationFrame and an ease-out-cubic curve. Shown to two decimals
+ * to match the payment amount format. Stops cleanly on unmount and won't
+ * mis-render if the prop changes mid-flight (it just retargets to the
+ * latest value).
+ */
+function CountUpAmount({ value, duration = 950 }: { value: number; duration?: number }) {
+  const [display, setDisplay] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    const start = performance.now();
+    const from = 0;
+    const to = Math.max(0, value || 0);
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(from + (to - from) * eased);
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value, duration]);
+  return <>{display.toFixed(2)}</>;
+}
+
+/**
+ * PaidStatusVisual
+ *
+ * Premium "Payment received" celebration. Built as layered, GPU-friendly
+ * CSS animations so it works reliably across modern mobile browsers
+ * without JS animation libraries:
+ *
+ *  1. Aurora — large radial-gradient orb with filter:blur scales in then
+ *     breathes gently behind everything.
+ *  2. Ripple rings — three concentric circles expand outward on a loop,
+ *     staggered for a sonar / tap-feedback effect.
+ *  3. Disc — gradient success disc pops in with an overshoot bezier,
+ *     starting blurred and snapping into focus.
+ *  4. Checkmark — SVG ring stroke draws around the disc, then the tick
+ *     itself draws on top using stroke-dashoffset animations.
+ *  5. Sparks — eight tiny dots fly outward radially with blur trails.
+ *  6. Text reveal — title, amount and RRN fade in one after another with
+ *     a blur-defocus + slide-up motion ("frosted glass" reveal).
+ *  7. Amount — value counts up from 0 to the final amount with easing.
+ *
+ * `prefers-reduced-motion` short-circuits the looping/breathing parts but
+ * still shows the final state, so accessibility users still get a clear
+ * confirmation without movement.
+ */
+function PaidStatusVisual({ order }: { order: PayOrder }) {
+  // 8 evenly-spaced spark angles around the disc.
+  const sparkCount = 8;
+  return (
+    <div className="pp-paid" role="status" aria-live="polite" aria-label="Payment received">
+      <div className="pp-paid-stage" aria-hidden="true">
+        <span className="pp-paid-aurora" />
+        <span className="pp-paid-ring pp-paid-ring--1" />
+        <span className="pp-paid-ring pp-paid-ring--2" />
+        <span className="pp-paid-ring pp-paid-ring--3" />
+        <span className="pp-paid-disc">
+          <svg className="pp-paid-check" viewBox="0 0 52 52" width="44" height="44">
+            <circle className="pp-paid-check-ring" cx="26" cy="26" r="22" />
+            <path className="pp-paid-check-tick" d="M14.5 27 L22.5 35 L38.5 18.5" />
+          </svg>
+        </span>
+        {Array.from({ length: sparkCount }).map((_, i) => (
+          <span
+            key={i}
+            className="pp-paid-spark"
+            style={{
+              ['--a' as string]: `${(360 / sparkCount) * i}deg`,
+              ['--d' as string]: String(i),
+            }}
+          />
+        ))}
+      </div>
+      <h3 className="pp-paid-title">Payment received</h3>
+      <p className="pp-paid-amount">
+        <span className="pp-paid-amount-cur">₹</span>
+        <span className="pp-paid-amount-val"><CountUpAmount value={order.amount} /></span>
+        <span className="pp-paid-amount-tag">confirmed</span>
+      </p>
+      {order.bank_rrn && (
+        <p className="pp-paid-rrn">Bank RRN <code>{order.bank_rrn}</code></p>
+      )}
+    </div>
+  );
+}
+
 function StatusVisual({ order }: { order: PayOrder }) {
   if (order.status === 'paid') {
-    return (
-      <div className="pp-status paid">
-        <div className="pp-status-icon">
-          <svg viewBox="0 0 52 52" width="52" height="52" aria-hidden="true">
-            <circle cx="26" cy="26" r="24" fill="none" stroke="currentColor" strokeWidth="3" />
-            <path d="M14 27 L23 36 L39 18" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
-        <h3>Payment received</h3>
-        <p>₹{order.amount.toFixed(2)} confirmed.</p>
-        {order.bank_rrn && <p className="pp-meta">Bank RRN <code>{order.bank_rrn}</code></p>}
-      </div>
-    );
+    return <PaidStatusVisual order={order} />;
   }
   if (order.status === 'failed') {
     return (
