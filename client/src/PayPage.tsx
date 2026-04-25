@@ -903,8 +903,18 @@ export default function PayPage() {
               onContextMenu={(e) => e.preventDefault()}
               onDragStart={(e) => e.preventDefault()}
             />
-            <span className="pp-qr-hint" aria-hidden="true">
-              {downloading ? 'Preparing…' : 'Tap or long-press to save'}
+            <span className="pp-qr-badge" aria-hidden="true">
+              {downloading ? (
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a9 9 0 1 1-9-9" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 4v12" />
+                  <path d="M6 12l6 6 6-6" />
+                  <path d="M5 20h14" />
+                </svg>
+              )}
             </span>
           </div>
           <ol className="pp-steps">
