@@ -78,41 +78,51 @@ function fingerprintRequest(parts: Record<string, unknown>): string {
 /**
  * Shape an order for the JSON API response.
  *
- * Server-mode orders return raw UPI payload + QR but never expose a hosted
- * payment_page_url, since the hosted page is intentionally disabled for
- * Method 1 integrations. Hosted-mode orders flip that — they return the
- * payment_page_url their customer should be redirected to and omit the raw
- * UPI payload (the merchant doesn't render the QR themselves).
+ * Server-mode orders return raw UPI payload only — no hosted page URL,
+ * no public_token, no redirect/cancel URLs. Those are Hosted Page fields.
+ *
+ * Hosted-mode orders return payment_page_url, public_token, qr_image_url,
+ * redirect_url, cancel_url — but never expose the raw UPI payload (the
+ * merchant doesn't render the QR themselves; our hosted page does).
  */
 function shapeOrderForApi(o: any, baseReq?: { protocol: string; get: (h: string) => string | undefined }) {
   const mode: OrderMode = (o.order_mode === 'server' ? 'server' : 'hosted');
-  const base = {
+
+  if (mode === 'server') {
+    return {
+      order_id: o.id,
+      txn_ref: o.txn_ref,
+      client_order_id: o.client_order_id || undefined,
+      amount: parseFloat(o.amount),
+      currency: o.currency,
+      status: o.status,
+      mode,
+      payment_link: o.upi_payload,
+      upi_payload: o.upi_payload,
+      callback_url: o.callback_url || undefined,
+      created_at: o.created_at,
+      expires_at: o.expires_at,
+    };
+  }
+
+  // hosted — never expose raw upi_payload
+  const paymentPageUrl = baseReq && o.public_token ? buildPaymentPageUrl(baseReq, o.public_token) : undefined;
+  return {
     order_id: o.id,
     txn_ref: o.txn_ref,
-    client_order_id: o.client_order_id,
+    client_order_id: o.client_order_id || undefined,
     amount: parseFloat(o.amount),
     currency: o.currency,
     status: o.status,
     mode,
     public_token: o.public_token,
-    created_at: o.created_at,
-    expires_at: o.expires_at,
-    callback_url: o.callback_url || undefined,
+    payment_page_url: paymentPageUrl,
+    qr_image_url: o.public_token ? `/api/pay/${o.public_token}/qr.png?size=2048` : undefined,
     redirect_url: o.redirect_url || undefined,
     cancel_url: o.cancel_url || undefined,
-  };
-  if (mode === 'server') {
-    return {
-      ...base,
-      payment_link: o.upi_payload,
-      upi_payload: o.upi_payload,
-      qr_image_url: o.public_token ? `/api/pay/${o.public_token}/qr.png` : undefined,
-    };
-  }
-  // hosted
-  return {
-    ...base,
-    payment_page_url: baseReq && o.public_token ? buildPaymentPageUrl(baseReq, o.public_token) : undefined,
+    callback_url: o.callback_url || undefined,
+    created_at: o.created_at,
+    expires_at: o.expires_at,
   };
 }
 
@@ -138,6 +148,22 @@ router.post('/create-order', gwApiToken, createOrderLimiter, async (req: GwApiRe
     const access = await canAccessMethod(user, mode);
     if (!access.allowed) {
       return apiError(res, 403, access.reason || 'Feature not available on your plan.', access.code || 'PLAN_FEATURE_LOCKED');
+    }
+
+    // Hosted-only fields (redirect_url, cancel_url) are blocked when mode="server".
+    // These are browser redirect URLs that only make sense on the hosted checkout page.
+    // Reject them regardless of plan so the API is always consistent.
+    if (mode === 'server') {
+      const hasRedirect = req.body.redirect_url !== undefined && req.body.redirect_url !== null && req.body.redirect_url !== '';
+      const hasCancel   = req.body.cancel_url   !== undefined && req.body.cancel_url   !== null && req.body.cancel_url   !== '';
+      if (hasRedirect || hasCancel) {
+        return apiError(
+          res, 403,
+          'redirect_url and cancel_url are available only with Hosted Pay Page plans.',
+          'PLAN_FEATURE_LOCKED',
+          { blocked_fields: [...(hasRedirect ? ['redirect_url'] : []), ...(hasCancel ? ['cancel_url'] : [])] },
+        );
+      }
     }
 
     // ---- Input validation ----

@@ -1299,16 +1299,20 @@ code {
    ============================================ */
 @media (max-width: 600px) {
   .gw-card { padding: 14px; }
-  .gw-tabs { padding: 3px; }
-  .gw-tab { padding: 7px 10px; font-size: 12px; }
-  .gw-params { font-size: 12px; }
-  .gw-params th, .gw-params td { padding: 8px 9px; }
-  .gw-code { font-size: 11.5px; padding: 11px 12px; line-height: 1.55; }
+  .gw-tabs { padding: 3px; gap: 1px; }
+  .gw-tab { padding: 7px 9px; font-size: 11.5px; }
+  .gw-params { font-size: 11.5px; min-width: 480px; }
+  .gw-params th, .gw-params td { padding: 7px 8px; }
+  .gw-params td:first-child { white-space: nowrap; }
+  .gw-params-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+  .gw-code { font-size: 11px; padding: 11px 12px; line-height: 1.55; }
+  .gw-code-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .gw-copy { padding: 3px 7px; font-size: 10.5px; }
-  .gw-base-row { padding: 4px; gap: 4px; }
+  .gw-base-row { padding: 4px; gap: 4px; flex-wrap: wrap; }
   .gw-base-row b { padding: 5px 8px; font-size: 10px; }
-  .gw-base-row code { font-size: 12px; padding: 5px 8px; }
+  .gw-base-row code { font-size: 11.5px; padding: 5px 8px; word-break: break-all; }
   .gw-h4 { margin: 12px 0 5px; }
+  .gw-page { overflow-x: hidden; }
 }
 
 /* ============================================

@@ -54,48 +54,54 @@ function pretty(v: any) {
 }
 
 /* ============================================================
+   Plan badge helper
+   ============================================================ */
+
+function PlanBadge({ user }: { user: any }) {
+  if (!user) return null;
+  if (user.is_owner) return <span className="gw-badge mute">Owner</span>;
+  const sub = user.active_subscription;
+  if (!sub) return null;
+  const label = sub.method_access === 'server' ? 'Server API'
+              : sub.method_access === 'hosted' ? 'Hosted Page'
+              : 'Master';
+  const days = sub.days_left !== null ? ` · ${sub.days_left}d` : '';
+  return <span className="gw-badge ok" style={{ fontSize: 12, fontWeight: 600 }}>{label}{days}</span>;
+}
+
+/* ============================================================
    Tabs
    ============================================================ */
 
 type TabKey = 'test' | 'server' | 'hosted' | 'setup';
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'test',   label: 'Test' },
-  { key: 'server', label: 'Server' },
-  { key: 'hosted', label: 'Hosted Page' },
-  { key: 'setup',  label: 'Setup' },
-];
 
 /* ============================================================
    Page
    ============================================================ */
 
-function PlanLockCard({ method, isOwner }: { method: 'server' | 'hosted'; isOwner: boolean }) {
-  if (isOwner) return null;
-  return (
-    <div className="gw-card feature gw-lock-card">
-      <div className="gw-card-h">
-        <h3>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-          {method === 'server' ? 'Server API' : 'Hosted Page'} not in your plan
-        </h3>
-      </div>
-      <p>Upgrade to a plan that includes the <strong>{method}</strong> method to use this integration.</p>
-      <div className="gw-actions">
-        <Link to="/gateway/billing" className="gw-btn-primary">View plans →</Link>
-      </div>
-    </div>
-  );
-}
-
 export default function GwDocs() {
   const { refresh, user } = useGwAuth();
-  const [tab, setTab] = useState<TabKey>('test');
   const access = user?.access || { server: false, hosted: false, master: false };
   const isOwner = !!user?.is_owner;
   const canServer = isOwner || access.server || access.master;
   const canHosted = isOwner || access.hosted || access.master;
+  const isMasterOrOwner = isOwner || access.master;
 
-  // ---- Token state (kept identical to previous behavior) ----
+  // Dynamic tab list based on plan
+  const allTabs: { key: TabKey; label: string }[] = [
+    { key: 'test',   label: 'Test' },
+    ...(canServer ? [{ key: 'server' as TabKey, label: 'Server' }] : []),
+    ...(canHosted ? [{ key: 'hosted' as TabKey, label: 'Hosted Page' }] : []),
+    { key: 'setup',  label: 'Setup' },
+  ];
+
+  const defaultTab: TabKey = 'test';
+  const [tab, setTab] = useState<TabKey>(defaultTab);
+
+  // Ensure active tab is always valid
+  const validTab = allTabs.find(t => t.key === tab) ? tab : (allTabs[0]?.key || 'test');
+
+  // ---- Token state ----
   const [token, setToken] = useState('');
   const [created, setCreated] = useState<string | null>(null);
   const [show, setShow] = useState(false);
@@ -154,11 +160,11 @@ export default function GwDocs() {
       <div className="gw-page-h">
         <div>
           <h2>API Reference</h2>
-          <p>Token, endpoints and examples.</p>
+          <p>Token, endpoints and integration guide.</p>
         </div>
+        <PlanBadge user={user} />
       </div>
 
-      {/* Token card and Base URL — pinned above tabs */}
       <ApiTokenCard
         token={token}
         created={created}
@@ -181,12 +187,12 @@ export default function GwDocs() {
       </div>
 
       <div className="gw-tabs" role="tablist">
-        {TABS.map((t) => (
+        {allTabs.map((t) => (
           <button
             key={t.key}
             role="tab"
-            aria-selected={tab === t.key}
-            className={`gw-tab${tab === t.key ? ' active' : ''}`}
+            aria-selected={validTab === t.key}
+            className={`gw-tab${validTab === t.key ? ' active' : ''}`}
             onClick={() => setTab(t.key)}
           >
             {t.label}
@@ -194,14 +200,10 @@ export default function GwDocs() {
         ))}
       </div>
 
-      {tab === 'test'   && <TestTab   token={token} baseUrl={baseUrl} settingsActive={settingsActive} canServer={canServer} canHosted={canHosted} />}
-      {tab === 'server' && (canServer
-        ? <ServerTab baseUrl={baseUrl} token={token} />
-        : <PlanLockCard method="server" isOwner={isOwner} />)}
-      {tab === 'hosted' && (canHosted
-        ? <HostedPageTab />
-        : <PlanLockCard method="hosted" isOwner={isOwner} />)}
-      {tab === 'setup'  && <SetupTab  baseUrl={baseUrl} />}
+      {validTab === 'test'   && <TestTab   token={token} baseUrl={baseUrl} settingsActive={settingsActive} canServer={canServer} canHosted={canHosted} isMasterOrOwner={isMasterOrOwner} />}
+      {validTab === 'server' && <ServerTab  baseUrl={baseUrl} token={token} />}
+      {validTab === 'hosted' && <HostedPageTab />}
+      {validTab === 'setup'  && <SetupTab   baseUrl={baseUrl} canServer={canServer} canHosted={canHosted} isMasterOrOwner={isMasterOrOwner} />}
     </div>
   );
 }
@@ -319,7 +321,10 @@ function ApiTokenCard(props: {
    TEST TAB
    ============================================================ */
 
-function TestTab({ token, baseUrl, settingsActive, canServer, canHosted }: { token: string; baseUrl: string; settingsActive: boolean; canServer: boolean; canHosted: boolean }) {
+function TestTab({ token, baseUrl, settingsActive, canServer, canHosted, isMasterOrOwner }: {
+  token: string; baseUrl: string; settingsActive: boolean;
+  canServer: boolean; canHosted: boolean; isMasterOrOwner: boolean;
+}) {
   return (
     <>
       <div className="gw-card">
@@ -332,15 +337,16 @@ function TestTab({ token, baseUrl, settingsActive, canServer, canHosted }: { tok
         <ol className="gw-steps">
           <li>Save UPI settings.</li>
           <li>Create API token.</li>
-          <li>Create a test order.</li>
-          <li>Open hosted payment page.</li>
-          <li>Scan or pay using UPI.</li>
+          <li>Create a test order below.</li>
+          {canServer && !canHosted && <li>Use <code>payment_link</code> or <code>upi_payload</code> in your own UI.</li>}
+          {canHosted && <li>Open the hosted payment page link.</li>}
+          {canServer && !canHosted && <li>Scan the UPI link or redirect to a UPI app.</li>}
           <li>Check final status.</li>
         </ol>
       </div>
 
       {token && settingsActive ? (
-        <TestConsole apiToken={token} baseUrl={baseUrl} canServer={canServer} canHosted={canHosted} />
+        <TestConsole apiToken={token} baseUrl={baseUrl} canServer={canServer} canHosted={canHosted} isMasterOrOwner={isMasterOrOwner} />
       ) : (
         <div className="gw-card">
           <div className="gw-card-h">
@@ -380,137 +386,34 @@ function TestTab({ token, baseUrl, settingsActive, canServer, canHosted }: { tok
    ============================================================ */
 
 function ServerTab({ baseUrl, token }: { baseUrl: string; token: string }) {
-  const tokenForCode = token || 'YOUR_API_TOKEN';
-
-  const createCurl = `curl -X POST '${baseUrl}/create-order' \\
-  -H 'Authorization: Bearer ${tokenForCode}' \\
-  -H 'Content-Type: application/json' \\
-  -d '{
-    "mode": "hosted",
-    "amount": 199.00,
-    "currency": "INR",
-    "client_order_id": "ORD-1001",
-    "callback_url": "https://your-site.com/payment/webhook",
-    "redirect_url": "https://your-site.com/payment/success",
-    "cancel_url": "https://your-site.com/payment/cancelled"
-  }'`;
-
-  const jsCode = `const res = await fetch('${baseUrl}/create-order', {
-  method: 'POST',
-  headers: {
-    'Authorization': 'Bearer ${tokenForCode}',
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    mode: 'hosted',
-    amount: 199,
-    currency: 'INR',
-    client_order_id: 'ORD-1001',
-    callback_url: 'https://your-site.com/payment/webhook',
-    redirect_url: 'https://your-site.com/payment/success',
-    cancel_url: 'https://your-site.com/payment/cancelled',
-  }),
-});
-const { data } = await res.json();
-console.log(data.payment_page_url);`;
-
-  const pyCode = `import requests
-
-r = requests.post(
-    '${baseUrl}/create-order',
-    headers={'Authorization': 'Bearer ${tokenForCode}'},
-    json={
-        'mode': 'hosted',
-        'amount': 199,
-        'currency': 'INR',
-        'client_order_id': 'ORD-1001',
-        'callback_url': 'https://your-site.com/payment/webhook',
-        'redirect_url': 'https://your-site.com/payment/success',
-        'cancel_url': 'https://your-site.com/payment/cancelled',
-    },
-    timeout=20,
-)
-print(r.json())`;
-
-  const phpCode = `<?php
-$ch = curl_init('${baseUrl}/create-order');
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch, CURLOPT_POST, true);
-curl_setopt($ch, CURLOPT_HTTPHEADER, [
-  'Authorization: Bearer ${tokenForCode}',
-  'Content-Type: application/json',
-]);
-curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
-  'mode' => 'hosted',
-  'amount' => 199,
-  'currency' => 'INR',
-  'client_order_id' => 'ORD-1001',
-  'callback_url' => 'https://your-site.com/payment/webhook',
-  'redirect_url' => 'https://your-site.com/payment/success',
-  'cancel_url' => 'https://your-site.com/payment/cancelled',
-]));
-echo curl_exec($ch);`;
-
   const createResp = `{
   "success": true,
   "data": {
     "order_id": 123,
-    "txn_ref": "GW20260420101501123ABCD1234",
+    "txn_ref": "GW20260425101501123ABCD1234",
     "amount": 199,
     "currency": "INR",
     "status": "pending",
+    "mode": "server",
     "payment_link": "upi://pay?pa=merchant@paytm&am=199.00&...",
-    "public_token": "9k3mZpQ2vR8sT1xY4nL6Aw",
-    "payment_page_url": "https://your-domain.com/pay/9k3mZpQ2vR8sT1xY4nL6Aw",
-    "qr_image_url": "/api/pay/9k3mZpQ2vR8sT1xY4nL6Aw/qr.png",
-    "expires_at": "2026-04-20T10:45:01.000Z",
-    "redirect_url": "https://your-site.com/payment/success",
-    "cancel_url": "https://your-site.com/payment/cancelled"
+    "upi_payload": "upi://pay?pa=merchant@paytm&am=199.00&...",
+    "expires_at": "2026-04-25T10:45:01.000Z"
   }
 }`;
-
-  const checkCurl = `curl -X POST '${baseUrl}/check-order' \\
-  -H 'Authorization: Bearer ${tokenForCode}' \\
-  -H 'Content-Type: application/json' \\
-  -d '{ "order_id": 123 }'`;
 
   const checkResp = `{
   "success": true,
   "data": {
     "order_id": 123,
+    "txn_ref": "GW20260425101501123ABCD1234",
     "status": "paid",
+    "amount": 199,
+    "currency": "INR",
+    "mode": "server",
     "bank_rrn": "412345678901",
-    "verified_at": "2026-04-20T10:18:23.000Z",
+    "verified_at": "2026-04-25T10:18:23.000Z",
     "payment_received": true
   }
-}`;
-
-  const errResp = `{
-  "success": false,
-  "message": "Invalid API token",
-  "code": "INVALID_API_TOKEN"
-}`;
-
-  const callbackPayload = `{
-  "order_id": 123,
-  "client_order_id": "ORD-1001",
-  "txn_ref": "GW20260420101501123ABCD1234",
-  "amount": 199,
-  "currency": "INR",
-  "status": "paid",
-  "bank_rrn": "412345678901",
-  "verified_at": "2026-04-20T10:18:23.000Z"
-}`;
-
-  const verifyJs = `const crypto = require('crypto');
-
-const expected = crypto
-  .createHmac('sha256', YOUR_API_TOKEN)
-  .update(rawBody)
-  .digest('hex');
-
-if (expected !== req.headers['x-gateway-signature']) {
-  throw new Error('bad signature');
 }`;
 
   return (
@@ -521,9 +424,10 @@ if (expected !== req.headers['x-gateway-signature']) {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
             Server API
           </h3>
+          <span className="gw-badge mute">Method 1</span>
         </div>
         <p className="gw-muted" style={{ marginTop: -2 }}>
-          Use this method when your backend creates orders and checks payment status. Your server keeps the API token private.
+          Your backend creates orders, receives the UPI payload, shows QR or UPI links in your own UI, and confirms payment status. The API token stays private on your server.
         </p>
       </div>
 
@@ -536,52 +440,26 @@ if (expected !== req.headers['x-gateway-signature']) {
         <div className="gw-base-row"><code>{baseUrl}/create-order</code><Copy text={`${baseUrl}/create-order`} /></div>
 
         <div className="gw-h4">Headers</div>
-        <Code>{`Authorization: Bearer YOUR_API_TOKEN
-Content-Type: application/json`}</Code>
+        <Code>{`Authorization: Bearer YOUR_API_TOKEN\nContent-Type: application/json`}</Code>
 
-        <div className="gw-h4">Body</div>
+        <div className="gw-h4">Request body</div>
         <div className="gw-params-wrap">
           <table className="gw-params">
             <thead><tr><th>Field</th><th>Type</th><th>Req</th><th>Description</th></tr></thead>
             <tbody>
-              <tr><td>mode</td><td>string</td><td>yes</td><td><code>hosted</code> (redirect to our pay page) or <code>server</code> (your UI renders the QR/UPI link)</td></tr>
-              <tr><td>amount</td><td>number</td><td>yes</td><td>INR amount, e.g. 199.00</td></tr>
-              <tr><td>currency</td><td>string</td><td>no</td><td>Default INR</td></tr>
+              <tr><td>mode</td><td>string</td><td>yes</td><td>Use <code>"server"</code></td></tr>
+              <tr><td>amount</td><td>number</td><td>yes</td><td>INR amount, e.g. <code>199.00</code></td></tr>
+              <tr><td>currency</td><td>string</td><td>no</td><td>Default <code>INR</code></td></tr>
               <tr><td>client_order_id</td><td>string</td><td>no</td><td>Your unique order id</td></tr>
-              <tr><td>customer_reference</td><td>string</td><td>no</td><td>Your customer/user ref</td></tr>
+              <tr><td>customer_reference</td><td>string</td><td>no</td><td>Your customer or user reference</td></tr>
               <tr><td>callback_url</td><td>string</td><td>no</td><td>Server webhook URL (POST, signed)</td></tr>
-              <tr><td>redirect_url</td><td>string</td><td>no</td><td>Browser success redirect after <code>paid</code></td></tr>
-              <tr><td>cancel_url</td><td>string</td><td>no</td><td>Browser cancel/failure redirect</td></tr>
               <tr><td>note</td><td>string</td><td>no</td><td>Shown in UPI app</td></tr>
             </tbody>
           </table>
         </div>
 
-        <div className="gw-h4">Examples</div>
-        <details className="gw-acc" open>
-          <summary>cURL</summary>
-          <div className="gw-acc-body"><Code>{createCurl}</Code></div>
-        </details>
-        <details className="gw-acc">
-          <summary>JavaScript</summary>
-          <div className="gw-acc-body"><Code>{jsCode}</Code></div>
-        </details>
-        <details className="gw-acc">
-          <summary>Python</summary>
-          <div className="gw-acc-body"><Code>{pyCode}</Code></div>
-        </details>
-        <details className="gw-acc">
-          <summary>PHP</summary>
-          <div className="gw-acc-body"><Code>{phpCode}</Code></div>
-        </details>
-
         <div className="gw-h4">Response</div>
         <Code>{createResp}</Code>
-
-        <details className="gw-acc">
-          <summary>Errors</summary>
-          <div className="gw-acc-body"><Code>{errResp}</Code></div>
-        </details>
       </div>
 
       {/* Check order */}
@@ -592,7 +470,7 @@ Content-Type: application/json`}</Code>
         </div>
         <div className="gw-base-row"><code>{baseUrl}/check-order</code><Copy text={`${baseUrl}/check-order`} /></div>
 
-        <div className="gw-h4">Body or query — any one</div>
+        <div className="gw-h4">Body or query — provide any one</div>
         <div className="gw-params-wrap">
           <table className="gw-params">
             <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
@@ -604,9 +482,6 @@ Content-Type: application/json`}</Code>
           </table>
         </div>
 
-        <div className="gw-h4">Example</div>
-        <Code>{checkCurl}</Code>
-
         <div className="gw-h4">Response</div>
         <Code>{checkResp}</Code>
       </div>
@@ -616,28 +491,12 @@ Content-Type: application/json`}</Code>
         <div className="gw-card-h">
           <h3>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            Webhooks
+            Webhook (callback_url)
           </h3>
         </div>
         <p className="gw-muted" style={{ marginTop: -2 }}>
-          <code>callback_url</code> receives server-to-server payment updates. Verify the <code>X-Gateway-Signature</code> header before trusting webhook data.
+          When a payment is confirmed, the gateway sends a signed <code>POST</code> to your <code>callback_url</code>. Verify the <code>X-Gateway-Signature</code> header (HMAC-SHA256 of the raw body, keyed with your API token) before trusting the data. Always confirm payment status via <code>check-order</code> or the webhook before delivering the product or service.
         </p>
-
-        <div className="gw-h4">Payload</div>
-        <Code>{callbackPayload}</Code>
-
-        <div className="gw-h4">Verify signature</div>
-        <p className="gw-muted" style={{ margin: '4px 0 8px' }}>
-          HMAC-SHA256 hex of the raw body, keyed with <b>your API token</b>.
-        </p>
-        <Code>{verifyJs}</Code>
-
-        <div className="gw-h4">URL types</div>
-        <ul className="gw-list">
-          <li><span className="gw-badge mute" style={{ minWidth: 92, justifyContent: 'center' }}>callback_url</span> server webhook only — never opened in a browser</li>
-          <li><span className="gw-badge ok" style={{ minWidth: 92, justifyContent: 'center' }}>redirect_url</span> browser redirect after <code>paid</code></li>
-          <li><span className="gw-badge bad" style={{ minWidth: 92, justifyContent: 'center' }}>cancel_url</span> browser redirect after <code>failed</code>, <code>expired</code>, or <code>cancelled</code></li>
-        </ul>
       </div>
     </>
   );
@@ -648,6 +507,24 @@ Content-Type: application/json`}</Code>
    ============================================================ */
 
 function HostedPageTab() {
+  const createResp = `{
+  "success": true,
+  "data": {
+    "order_id": 123,
+    "txn_ref": "GW20260425101501123ABCD1234",
+    "amount": 199,
+    "currency": "INR",
+    "status": "pending",
+    "mode": "hosted",
+    "public_token": "9k3mZpQ2vR8sT1xY4nL6Aw",
+    "payment_page_url": "https://your-domain.com/pay/9k3mZpQ2vR8sT1xY4nL6Aw",
+    "qr_image_url": "/api/pay/9k3mZpQ2vR8sT1xY4nL6Aw/qr.png?size=2048",
+    "redirect_url": "https://your-site.com/payment/success",
+    "cancel_url": "https://your-site.com/payment/cancelled",
+    "expires_at": "2026-04-25T10:45:01.000Z"
+  }
+}`;
+
   return (
     <>
       <div className="gw-card">
@@ -656,12 +533,44 @@ function HostedPageTab() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
             Hosted payment page
           </h3>
+          <span className="gw-badge mute">Method 2</span>
         </div>
         <p className="gw-muted" style={{ marginTop: -2 }}>
-          Every <code>create-order</code> response returns <code>payment_page_url</code>. Share this URL with the customer. The page shows QR, UPI apps, status polling and the final result.
+          Your backend creates the order and receives a <code>payment_page_url</code>. Send that URL to the customer. The hosted page handles the QR display, UPI app links, status polling, and the final redirect.
         </p>
       </div>
 
+      {/* Create order */}
+      <div className="gw-card">
+        <div className="gw-card-h">
+          <h3>Create order</h3>
+          <span className="gw-method">POST</span>
+        </div>
+        <div className="gw-base-row"><code>/api/gateway/create-order</code><Copy text="/api/gateway/create-order" /></div>
+
+        <div className="gw-h4">Request body</div>
+        <div className="gw-params-wrap">
+          <table className="gw-params">
+            <thead><tr><th>Field</th><th>Type</th><th>Req</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td>mode</td><td>string</td><td>yes</td><td>Use <code>"hosted"</code></td></tr>
+              <tr><td>amount</td><td>number</td><td>yes</td><td>INR amount, e.g. <code>199.00</code></td></tr>
+              <tr><td>currency</td><td>string</td><td>no</td><td>Default <code>INR</code></td></tr>
+              <tr><td>client_order_id</td><td>string</td><td>no</td><td>Your unique order id</td></tr>
+              <tr><td>customer_reference</td><td>string</td><td>no</td><td>Your customer or user reference</td></tr>
+              <tr><td>callback_url</td><td>string</td><td>no</td><td>Server webhook URL (POST, signed)</td></tr>
+              <tr><td>redirect_url</td><td>string</td><td>no</td><td>Browser redirect after <code>paid</code></td></tr>
+              <tr><td>cancel_url</td><td>string</td><td>no</td><td>Browser redirect after <code>failed</code>, <code>expired</code>, or <code>cancelled</code></td></tr>
+              <tr><td>note</td><td>string</td><td>no</td><td>Shown in UPI app</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div className="gw-h4">Response</div>
+        <Code>{createResp}</Code>
+      </div>
+
+      {/* How it flows */}
       <div className="gw-card">
         <div className="gw-card-h">
           <h3>
@@ -670,38 +579,18 @@ function HostedPageTab() {
           </h3>
         </div>
         <ol className="gw-steps">
-          <li>Your server calls <code>create-order</code>.</li>
-          <li>You send <code>payment_page_url</code> to the customer.</li>
-          <li>Customer opens the page.</li>
+          <li>Your server calls <code>create-order</code> with <code>mode: "hosted"</code>.</li>
+          <li>Send <code>payment_page_url</code> to the customer (redirect or link).</li>
+          <li>Customer opens the hosted page.</li>
           <li>Customer scans QR or opens a UPI app.</li>
-          <li>Page keeps checking status.</li>
-          <li>If paid, page shows success.</li>
-          <li>If <code>redirect_url</code> exists, customer redirects after 5 seconds.</li>
+          <li>Page polls for payment status automatically.</li>
+          <li>On <code>paid</code>, page shows success and redirects to <code>redirect_url</code> after 5 seconds.</li>
+          <li>On failure or expiry, page redirects to <code>cancel_url</code>.</li>
+          <li>Your server still confirms via webhook or <code>check-order</code> before delivering the product.</li>
         </ol>
       </div>
 
-      <div className="gw-card">
-        <div className="gw-card-h">
-          <h3>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h18"/><polyline points="13 5 20 12 13 19"/></svg>
-            Redirect behavior
-          </h3>
-        </div>
-        <ul className="gw-list">
-          <li><span className="gw-badge ok"   style={{ minWidth: 92, justifyContent: 'center' }}>redirect_url</span> success page</li>
-          <li><span className="gw-badge bad"  style={{ minWidth: 92, justifyContent: 'center' }}>cancel_url</span> failed, expired or cancelled page</li>
-          <li><span className="gw-badge mute" style={{ minWidth: 92, justifyContent: 'center' }}>callback_url</span> server webhook only</li>
-        </ul>
-        <div className="gw-h4">Rules</div>
-        <ul className="gw-list">
-          <li>No redirect while pending.</li>
-          <li><code>redirect_url</code> only after <code>paid</code>.</li>
-          <li><code>cancel_url</code> only after <code>failed</code>, <code>expired</code> or <code>cancelled</code>.</li>
-          <li>Browser redirects after 5 seconds.</li>
-          <li>Customer can choose <em>Redirect now</em> or <em>Stay on this page</em>.</li>
-        </ul>
-      </div>
-
+      {/* Response fields */}
       <div className="gw-card">
         <div className="gw-card-h">
           <h3>
@@ -713,11 +602,12 @@ function HostedPageTab() {
           <table className="gw-params">
             <thead><tr><th>Field</th><th>Description</th></tr></thead>
             <tbody>
-              <tr><td>public_token</td><td>Public order token</td></tr>
-              <tr><td>payment_page_url</td><td>Hosted checkout URL</td></tr>
-              <tr><td>qr_image_url</td><td>QR PNG URL</td></tr>
-              <tr><td>redirect_url</td><td>Success redirect target</td></tr>
-              <tr><td>cancel_url</td><td>Failed/cancel redirect target</td></tr>
+              <tr><td>public_token</td><td>Public order token (safe to share)</td></tr>
+              <tr><td>payment_page_url</td><td>Hosted checkout URL — send this to the customer</td></tr>
+              <tr><td>qr_image_url</td><td>QR PNG URL (sizes: 512, 1024, 1080, 2048, 4096; default 2048)</td></tr>
+              <tr><td>redirect_url</td><td>Success redirect target (echoed from request)</td></tr>
+              <tr><td>cancel_url</td><td>Failed/cancel redirect target (echoed from request)</td></tr>
+              <tr><td>expires_at</td><td>Order expiry timestamp</td></tr>
             </tbody>
           </table>
         </div>
@@ -726,26 +616,34 @@ function HostedPageTab() {
           <summary>Public endpoints</summary>
           <div className="gw-acc-body">
             <ul className="gw-list">
-              <li><code>GET /pay/:public_token</code> — hosted page</li>
-              <li><code>GET /api/pay/:public_token</code> — JSON snapshot</li>
+              <li><code>GET /api/pay/:public_token</code> — JSON order snapshot</li>
               <li><code>POST /api/pay/:public_token/refresh</code> — re-verify with Paytm</li>
-              <li><code>GET /api/pay/:public_token/qr.png</code> — QR PNG (sizes: 512, 1024, 1080, 2048, 4096; default 2048)</li>
+              <li><code>GET /api/pay/:public_token/qr.png</code> — QR PNG download</li>
             </ul>
           </div>
         </details>
 
         <details className="gw-acc">
-          <summary>Security</summary>
+          <summary>Security notes</summary>
           <div className="gw-acc-body">
             <ul className="gw-list">
-              <li><code>public_token</code> is safe to share.</li>
-              <li>API token is never exposed on the hosted page.</li>
-              <li><code>callback_url</code> is never exposed to the browser.</li>
-              <li>Only public-safe order fields are shown.</li>
+              <li><code>public_token</code> is safe to share with customers.</li>
+              <li>Your API token is never exposed on the hosted page.</li>
+              <li><code>callback_url</code> is never sent to the browser.</li>
               <li>Payment is only final after backend verification.</li>
             </ul>
           </div>
         </details>
+      </div>
+
+      {/* Webhook */}
+      <div className="gw-card">
+        <div className="gw-card-h">
+          <h3>Webhook (callback_url)</h3>
+        </div>
+        <p className="gw-muted" style={{ marginTop: -2 }}>
+          When payment is confirmed, the gateway sends a signed <code>POST</code> to your <code>callback_url</code>. Verify the <code>X-Gateway-Signature</code> header (HMAC-SHA256 of the raw body, keyed with your API token) before trusting the data. Always confirm via webhook or <code>check-order</code> before delivering the product or service.
+        </p>
       </div>
     </>
   );
@@ -755,83 +653,58 @@ function HostedPageTab() {
    SETUP TAB
    ============================================================ */
 
-function SetupTab({ baseUrl }: { baseUrl: string }) {
-  const serverExample = `app.post("/create-payment", async (req, res) => {
-  const r = await fetch("${baseUrl}/create-order", {
-    method: "POST",
-    headers: {
-      "Authorization": \`Bearer \${process.env.GATEWAY_API_TOKEN}\`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      amount: req.body.amount,
-      client_order_id: req.body.orderId,
-      callback_url: "https://your-site.com/payment/webhook"
-    })
-  });
-
-  const data = await r.json();
-  res.json(data);
-});`;
-
-  const hostedExample = `const order = await createGatewayOrder({
-  amount: 199,
-  client_order_id: "ORD-1001",
-  callback_url: "https://your-site.com/api/payment/webhook",
-  redirect_url: "https://your-site.com/payment/success",
-  cancel_url: "https://your-site.com/payment/failed"
-});
-
-return res.json({
-  pay_url: order.data.payment_page_url
-});`;
-
+function SetupTab({ baseUrl, canServer, canHosted, isMasterOrOwner }: {
+  baseUrl: string; canServer: boolean; canHosted: boolean; isMasterOrOwner: boolean;
+}) {
   return (
     <>
-      <div className="gw-card">
-        <div className="gw-card-h">
-          <h3>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-            Method 1 — Server API setup
-          </h3>
+      {/* Method 1 — only shown to server or master/owner users */}
+      {canServer && (
+        <div className="gw-card">
+          <div className="gw-card-h">
+            <h3>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              Method 1 — Server API setup
+            </h3>
+            <span className="gw-badge mute">Your plan</span>
+          </div>
+          <p className="gw-muted" style={{ marginTop: -2 }}>
+            Your backend creates the order, shows the UPI link or QR in your own UI, and confirms payment status. You control the full checkout experience.
+          </p>
+          <ol className="gw-steps">
+            <li>Save UPI settings in the dashboard.</li>
+            <li>Create an API token on this page.</li>
+            <li>Store the token in a backend environment variable (never in the frontend).</li>
+            <li>Backend calls <code>POST /api/gateway/create-order</code> with <code>mode: "server"</code>.</li>
+            <li>Use <code>payment_link</code> or <code>upi_payload</code> to display QR or UPI deep-link in your UI.</li>
+            <li>Backend polls <code>POST /api/gateway/check-order</code> or listens to the <code>callback_url</code> webhook.</li>
+            <li>Mark the user's order paid only after gateway status is <code>"paid"</code>.</li>
+          </ol>
         </div>
-        <p className="gw-muted" style={{ marginTop: -2 }}>
-          Your backend creates the order, shows the QR or UPI link in your own UI, and confirms payment.
-        </p>
-        <ol className="gw-steps">
-          <li>Save UPI settings in dashboard.</li>
-          <li>Create API token.</li>
-          <li>Store the API token in a backend env variable.</li>
-          <li>Backend calls <code>POST /create-order</code>.</li>
-          <li>Show QR or UPI link in your own frontend.</li>
-          <li>Backend checks <code>POST /check-order</code> or receives <code>callback_url</code> webhook.</li>
-          <li>Mark the user order paid only after gateway status is <code>paid</code>.</li>
-        </ol>
-        <div className="gw-h4">Node / Express example</div>
-        <Code>{serverExample}</Code>
-      </div>
+      )}
 
-      <div className="gw-card">
-        <div className="gw-card-h">
-          <h3>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            Method 2 — Hosted payment page setup
-          </h3>
+      {/* Method 2 — only shown to hosted or master/owner users */}
+      {canHosted && (
+        <div className="gw-card">
+          <div className="gw-card-h">
+            <h3>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              Method 2 — Hosted payment page setup
+            </h3>
+            {!canServer && <span className="gw-badge mute">Your plan</span>}
+          </div>
+          <p className="gw-muted" style={{ marginTop: -2 }}>
+            Your backend creates the order and redirects the customer to the hosted checkout. We handle the QR display, UPI links, and status polling.
+          </p>
+          <ol className="gw-steps">
+            <li>Backend calls <code>POST /api/gateway/create-order</code> with <code>mode: "hosted"</code>.</li>
+            <li>Include <code>redirect_url</code> and <code>cancel_url</code> to control the post-payment redirect.</li>
+            <li>Redirect the customer to <code>payment_page_url</code>.</li>
+            <li>Customer pays on the hosted page; we redirect them after a final status.</li>
+            <li>Your server verifies via webhook or <code>check-order</code> before delivering the product.</li>
+          </ol>
         </div>
-        <p className="gw-muted" style={{ marginTop: -2 }}>
-          Your backend creates the order and sends the customer to our hosted checkout. We handle the UI.
-        </p>
-        <ol className="gw-steps">
-          <li>Backend calls <code>POST /create-order</code>.</li>
-          <li>Include <code>redirect_url</code> and <code>cancel_url</code>.</li>
-          <li>Send <code>payment_page_url</code> to the customer.</li>
-          <li>Customer pays on the hosted page.</li>
-          <li>Gateway redirects the customer after final status.</li>
-          <li>Your server still verifies via webhook or <code>check-order</code> before delivering the product.</li>
-        </ol>
-        <div className="gw-h4">Minimal example</div>
-        <Code>{hostedExample}</Code>
-      </div>
+      )}
 
       <div className="gw-card">
         <div className="gw-card-h">
@@ -842,10 +715,10 @@ return res.json({
         </div>
         <ul className="gw-list">
           <li>Never expose the API token in the frontend.</li>
-          <li>Use <code>callback_url</code> for backend confirmation.</li>
-          <li>Use <code>redirect_url</code> only for the customer landing page.</li>
-          <li>Always verify status before giving the product or service.</li>
-          <li>Use <code>client_order_id</code> to match your own order.</li>
+          <li>Use <code>callback_url</code> for backend confirmation (server webhook).</li>
+          {canHosted && <li>Use <code>redirect_url</code> only for the customer landing page after payment.</li>}
+          <li>Always verify payment status before giving the product or service.</li>
+          <li>Use <code>client_order_id</code> to match your own order records.</li>
         </ul>
       </div>
     </>
@@ -853,11 +726,16 @@ return res.json({
 }
 
 /* ============================================================
-   TestConsole — kept identical in behavior
+   TestConsole — plan-aware
    ============================================================ */
 
-function TestConsole({ apiToken, baseUrl, canServer, canHosted }: { apiToken: string; baseUrl: string; canServer: boolean; canHosted: boolean }) {
-  const defaultMode = canHosted ? 'hosted' : (canServer ? 'server' : 'hosted');
+function TestConsole({ apiToken, baseUrl, canServer, canHosted, isMasterOrOwner }: {
+  apiToken: string; baseUrl: string; canServer: boolean; canHosted: boolean; isMasterOrOwner: boolean;
+}) {
+  // Determine the fixed or selectable mode
+  const modeFixed = !isMasterOrOwner;
+  const defaultMode: 'hosted' | 'server' = canHosted ? 'hosted' : 'server';
+
   const [mode, setMode] = useState<'hosted' | 'server'>(defaultMode);
   const [amount, setAmount] = useState('1.00');
   const [currency, setCurrency] = useState('INR');
@@ -876,6 +754,9 @@ function TestConsole({ apiToken, baseUrl, canServer, canHosted }: { apiToken: st
   const [checkBusy, setCheckBusy] = useState(false);
   const [checkOut, setCheckOut] = useState<{ status: number; ok: boolean; body: any } | null>(null);
 
+  // When mode changes, clear redirect/cancel fields that aren't applicable
+  const showHostedFields = mode === 'hosted';
+
   const runCreate = async () => {
     setCreateBusy(true); setCreateOut(null);
     const body: any = {
@@ -886,8 +767,8 @@ function TestConsole({ apiToken, baseUrl, canServer, canHosted }: { apiToken: st
     if (clientOrderId.trim()) body.client_order_id = clientOrderId.trim();
     if (customerRef.trim()) body.customer_reference = customerRef.trim();
     if (callbackUrl.trim()) body.callback_url = callbackUrl.trim();
-    if (redirectUrl.trim()) body.redirect_url = redirectUrl.trim();
-    if (cancelUrl.trim()) body.cancel_url = cancelUrl.trim();
+    if (showHostedFields && redirectUrl.trim()) body.redirect_url = redirectUrl.trim();
+    if (showHostedFields && cancelUrl.trim()) body.cancel_url = cancelUrl.trim();
     if (note.trim()) body.note = note.trim();
     try {
       const r = await gwApiRaw('/create-order', apiToken, { method: 'POST', body });
@@ -936,16 +817,24 @@ function TestConsole({ apiToken, baseUrl, canServer, canHosted }: { apiToken: st
         <summary>Create test order</summary>
         <div className="gw-acc-body">
           <div className="gw-form">
+            {/* Mode selector — fixed for plan-specific users, selectable for master/owner */}
             <label className="gw-field">
               <span>Mode <span className="gw-required">*</span></span>
-              <div className="gw-select-wrap">
-                <select value={mode} onChange={(e) => setMode(e.target.value as any)}>
-                  <option value="hosted" disabled={!canHosted}>hosted — return payment_page_url</option>
-                  <option value="server" disabled={!canServer}>server — return upi_payload + qr_image_url</option>
-                </select>
-              </div>
-              <div className="gw-field-hint">Use <code>hosted</code> if your customer should be redirected to our pay page; <code>server</code> if you render your own UI.</div>
+              {modeFixed ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <code style={{ background: 'var(--gw-bg-2)', padding: '6px 10px', borderRadius: 6, fontSize: 13 }}>{mode}</code>
+                  <span className="gw-muted" style={{ fontSize: 12 }}>Fixed by your plan</span>
+                </div>
+              ) : (
+                <div className="gw-select-wrap">
+                  <select value={mode} onChange={(e) => { setMode(e.target.value as any); setCreateOut(null); }}>
+                    {canServer && <option value="server">server — return payment_link / upi_payload</option>}
+                    {canHosted && <option value="hosted">hosted — return payment_page_url</option>}
+                  </select>
+                </div>
+              )}
             </label>
+
             <label className="gw-field">
               <span>Amount (INR) <span className="gw-required">*</span></span>
               <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" placeholder="1.00" />
@@ -971,14 +860,21 @@ function TestConsole({ apiToken, baseUrl, canServer, canHosted }: { apiToken: st
               <span>callback_url <small>optional · server webhook</small></span>
               <input value={callbackUrl} onChange={(e) => setCallbackUrl(e.target.value)} placeholder="https://your-site.com/payment/webhook" inputMode="url" autoCapitalize="off" />
             </label>
-            <label className="gw-field">
-              <span>redirect_url <small>optional · browser success redirect</small></span>
-              <input value={redirectUrl} onChange={(e) => setRedirectUrl(e.target.value)} placeholder="https://your-site.com/payment/success" inputMode="url" autoCapitalize="off" />
-            </label>
-            <label className="gw-field">
-              <span>cancel_url <small>optional · browser cancel/failure redirect</small></span>
-              <input value={cancelUrl} onChange={(e) => setCancelUrl(e.target.value)} placeholder="https://your-site.com/payment/cancelled" inputMode="url" autoCapitalize="off" />
-            </label>
+
+            {/* Hosted-only fields */}
+            {showHostedFields && (
+              <>
+                <label className="gw-field">
+                  <span>redirect_url <small>optional · browser success redirect</small></span>
+                  <input value={redirectUrl} onChange={(e) => setRedirectUrl(e.target.value)} placeholder="https://your-site.com/payment/success" inputMode="url" autoCapitalize="off" />
+                </label>
+                <label className="gw-field">
+                  <span>cancel_url <small>optional · browser cancel/failure redirect</small></span>
+                  <input value={cancelUrl} onChange={(e) => setCancelUrl(e.target.value)} placeholder="https://your-site.com/payment/cancelled" inputMode="url" autoCapitalize="off" />
+                </label>
+              </>
+            )}
+
             <label className="gw-field">
               <span>note <small>optional</small></span>
               <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Sandbox order" />
@@ -998,11 +894,13 @@ function TestConsole({ apiToken, baseUrl, canServer, canHosted }: { apiToken: st
                 <span className={`gw-badge ${createOut.ok ? 'ok' : 'bad'}`}>HTTP {createOut.status || 'ERR'}</span>
                 {createOut.ok && createOut.body?.data?.order_id && (
                   <Link to="/gateway/transactions" style={{ marginLeft: 'auto', fontSize: 12.5 }}>
-                    View →
+                    View in Transactions →
                   </Link>
                 )}
               </div>
-              {createOut.ok && createOut.body?.data?.payment_page_url && (
+
+              {/* Hosted page buttons — only for hosted mode */}
+              {createOut.ok && mode === 'hosted' && createOut.body?.data?.payment_page_url && (
                 <div className="gw-actions" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
                   <a className="gw-btn-primary sm" href={createOut.body.data.payment_page_url} target="_blank" rel="noreferrer noopener">
                     Open hosted page ↗
@@ -1023,6 +921,7 @@ function TestConsole({ apiToken, baseUrl, canServer, canHosted }: { apiToken: st
                   )}
                 </div>
               )}
+
               <Code>{pretty(createOut.body)}</Code>
             </div>
           )}
@@ -1051,7 +950,6 @@ function TestConsole({ apiToken, baseUrl, canServer, canHosted }: { apiToken: st
               <button className="gw-btn-primary" onClick={runCheck} disabled={checkBusy || !lookupValue.trim()}>
                 {checkBusy ? 'Checking…' : 'Check'}
               </button>
-              <button className="gw-btn-ghost" type="button" onClick={() => setCheckOut(null)}>Clear</button>
             </div>
           </div>
 
@@ -1060,11 +958,6 @@ function TestConsole({ apiToken, baseUrl, canServer, canHosted }: { apiToken: st
               <div className="gw-base-row" style={{ marginBottom: 6 }}>
                 <b>Response</b>
                 <span className={`gw-badge ${checkOut.ok ? 'ok' : 'bad'}`}>HTTP {checkOut.status || 'ERR'}</span>
-                {checkOut.body?.data?.status && (
-                  <span className={`gw-badge ${checkOut.body.data.status === 'paid' ? 'ok' : checkOut.body.data.status === 'pending' ? 'warn' : 'bad'}`}>
-                    {checkOut.body.data.status}
-                  </span>
-                )}
               </div>
               <Code>{pretty(checkOut.body)}</Code>
             </div>
