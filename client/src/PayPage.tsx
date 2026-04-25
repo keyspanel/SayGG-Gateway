@@ -249,42 +249,43 @@ function formatTimeLeft(ms: number): string {
  */
 const ROLL_INTERVAL_MS = 2000;
 
-function AppLogoImg({ app }: { app: typeof UPI_APPS[number] }) {
-  // Probe the asset via a detached Image() so we can show the brand-color
-  // letter fallback if the SVG fails — without ever rendering an actual
-  // <img> element in the DOM (which would re-enable the long-press image
-  // popup we are trying to suppress).
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    const probe = new window.Image();
-    probe.onload = () => { if (!cancelled) setFailed(false); };
-    probe.onerror = () => { if (!cancelled) setFailed(true); };
-    probe.src = app.logo;
-    return () => { cancelled = true; };
-  }, [app.logo]);
-
-  if (failed) {
-    return (
-      <div className="pp-apps-fallback" style={{ background: app.accent }} role="img" aria-label={app.alt}>
-        {app.name.charAt(0).toUpperCase()}
-      </div>
-    );
-  }
-  return (
-    <ProtectedMedia
-      src={app.logo}
-      label={app.alt}
-      className="pp-apps-bg"
-      style={{ width: 40, height: 40 }}
-    />
-  );
-}
-
 function SupportedApps() {
   const [idx, setIdx] = useState(0);
   const total = UPI_APPS.length;
 
+  // Eagerly fetch + DECODE every logo once at mount. `image.decode()`
+  // resolves only after the bitmap is fully rasterised in memory, so by
+  // the time the carousel ticks, every logo div has its background ready
+  // and the swap is instantaneous — no fetch, no decode, no flash.
+  // We also track which (if any) logos failed so we can render the brand
+  // letter-tile fallback instead of a broken background.
+  const [failedSet, setFailedSet] = useState<Set<number>>(() => new Set());
+  useEffect(() => {
+    let cancelled = false;
+    UPI_APPS.forEach((a, i) => {
+      const img = new window.Image();
+      // Hint the decoder to start work immediately on the network thread.
+      (img as any).decoding = 'sync';
+      (img as any).fetchPriority = 'high';
+      const onErr = () => {
+        if (cancelled) return;
+        setFailedSet((s) => {
+          if (s.has(i)) return s;
+          const next = new Set(s); next.add(i); return next;
+        });
+      };
+      img.onerror = onErr;
+      img.src = a.logo;
+      // decode() returns a promise that settles once the bitmap is in memory.
+      // Browsers without decode() just use the onload path implicitly.
+      if (typeof (img as any).decode === 'function') {
+        (img as any).decode().catch(onErr);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Roll through apps on a timer; pause while the tab is hidden.
   useEffect(() => {
     let id: number | undefined;
     const start = () => {
@@ -308,30 +309,49 @@ function SupportedApps() {
     };
   }, [total]);
 
-  // Preload all logo assets once so transitions never reveal a flash of nothing.
-  useEffect(() => {
-    UPI_APPS.forEach((a) => {
-      const i = new Image();
-      i.src = a.logo;
-    });
-  }, []);
-
-  const app = UPI_APPS[idx];
-
   return (
     <div className="pp-apps">
       <div className="pp-apps-head">
         <span className="pp-apps-title">Supported UPI apps</span>
         <span className="pp-apps-sub">Scan with any of these</span>
       </div>
+      {/* Every app is mounted permanently — only the `is-active` class moves
+          between them. Because the background-image was decoded into memory
+          at mount, switching classes is purely a GPU paint and the new logo
+          is visible on the very next frame, with no fetch or decode delay. */}
       <div className="pp-apps-stage" aria-live="polite" aria-atomic="true">
-        {/* key forces a fresh mount → CSS enter animation re-runs each tick */}
-        <div className="pp-apps-item" key={idx}>
-          <div className="pp-apps-logo">
-            <AppLogoImg app={app} />
-          </div>
-          <div className="pp-apps-name">{app.name}</div>
-        </div>
+        {UPI_APPS.map((app, i) => {
+          const isActive = i === idx;
+          const isFailed = failedSet.has(i);
+          return (
+            <div
+              key={i}
+              className={`pp-apps-item${isActive ? ' is-active' : ''}`}
+              aria-hidden={!isActive}
+            >
+              <div className="pp-apps-logo">
+                {isFailed ? (
+                  <div
+                    className="pp-apps-fallback"
+                    style={{ background: app.accent }}
+                    role="img"
+                    aria-label={app.alt}
+                  >
+                    {app.name.charAt(0).toUpperCase()}
+                  </div>
+                ) : (
+                  <ProtectedMedia
+                    src={app.logo}
+                    label={app.alt}
+                    className="pp-apps-bg"
+                    style={{ width: 40, height: 40 }}
+                  />
+                )}
+              </div>
+              <div className="pp-apps-name">{app.name}</div>
+            </div>
+          );
+        })}
       </div>
       <div className="pp-apps-dots" aria-hidden="true">
         {UPI_APPS.map((_, i) => (
