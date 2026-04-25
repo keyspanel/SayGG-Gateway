@@ -1288,16 +1288,16 @@ export default function PayPage() {
           <span>Amount due</span>
           <strong>₹{order.amount.toFixed(2)} <small>{order.currency}</small></strong>
         </div>
-        <div className="pp-meta-row">
-          <div>
-            <b>Order</b>
+        <div className="pp-meta-row pp-meta-row--list">
+          <div className="pp-meta-item">
+            <b>Order ID</b>
             <div className="pp-meta-val">
-              <span>{orderRefId}</span>
+              <span className="pp-meta-mono">{orderRefId}</span>
               <CopyButton value={orderRefId} label="Order ID" />
             </div>
           </div>
           {order.note && (
-            <div>
+            <div className="pp-meta-item">
               <b>Note</b>
               <div className="pp-meta-val">
                 <span>{order.note}</span>
@@ -1305,8 +1305,20 @@ export default function PayPage() {
               </div>
             </div>
           )}
+          <div className="pp-meta-item">
+            <b>Ref</b>
+            <div className="pp-meta-val">
+              <span className="pp-meta-mono">{order.txn_ref}</span>
+              <CopyButton value={order.txn_ref} label="Reference" />
+            </div>
+          </div>
           {showCountdown && (
-            <div><b>Expires in</b><span className="pp-countdown">{formatTimeLeft(expiresMs)}</span></div>
+            <div className="pp-meta-item">
+              <b>Expires in</b>
+              <div className="pp-meta-val">
+                <span className="pp-countdown">{formatTimeLeft(expiresMs)}</span>
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -1370,16 +1382,31 @@ export default function PayPage() {
       {order.is_terminal && (
         <div className="pp-card pp-result">
           <StatusVisual order={order} />
-          <div className="pp-meta-row">
-            <div>
-              <b>Order</b>
+          <div className="pp-meta-row pp-meta-row--list">
+            <div className="pp-meta-item">
+              <b>Order ID</b>
               <div className="pp-meta-val">
-                <span>{orderRefId}</span>
+                <span className="pp-meta-mono">{orderRefId}</span>
                 <CopyButton value={orderRefId} label="Order ID" />
               </div>
             </div>
-            <div><b>Amount</b><span>₹{order.amount.toFixed(2)}</span></div>
-            {order.verified_at && <div><b>Confirmed</b><span>{new Date(order.verified_at).toLocaleString()}</span></div>}
+            <div className="pp-meta-item">
+              <b>Ref</b>
+              <div className="pp-meta-val">
+                <span className="pp-meta-mono">{order.txn_ref}</span>
+                <CopyButton value={order.txn_ref} label="Reference" />
+              </div>
+            </div>
+            <div className="pp-meta-item">
+              <b>Amount</b>
+              <div className="pp-meta-val"><span>₹{order.amount.toFixed(2)}</span></div>
+            </div>
+            {order.verified_at && (
+              <div className="pp-meta-item">
+                <b>Confirmed</b>
+                <div className="pp-meta-val"><span>{new Date(order.verified_at).toLocaleString()}</span></div>
+              </div>
+            )}
           </div>
           {/* Auto-redirect after the backend confirms the order is terminal
               and the matching merchant URL was set on create-order:
@@ -1398,10 +1425,6 @@ export default function PayPage() {
 
       <footer className="pp-foot">
         <span>Secured by <strong>PayGateway</strong></span>
-        <span className="pp-foot-ref">
-          Ref <code>{order.txn_ref}</code>
-          <CopyButton value={order.txn_ref} label="Reference" />
-        </span>
       </footer>
     </div>
   );
