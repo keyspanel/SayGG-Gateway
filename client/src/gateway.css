@@ -1417,6 +1417,23 @@ code {
   align-self: center;
   border: 1px solid var(--gw-border);
 }
+/* Interactive variant: tap or long-press the QR to download. The global
+   anti-long-press hook whitelists role="button", so the browser's native
+   image-popup never fires here even though the wrapper accepts gestures. */
+.pp-qr-wrap--interactive {
+  cursor: pointer;
+  outline: none;
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.pp-qr-wrap--interactive:hover { border-color: var(--gw-accent); }
+.pp-qr-wrap--interactive:active { transform: scale(0.985); }
+.pp-qr-wrap--interactive:focus-visible {
+  border-color: var(--gw-accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+}
+.pp-qr-wrap--interactive.is-busy { cursor: progress; opacity: 0.85; }
 
 /* ---------- Hosted-page anti-copy / anti-long-press protection ---------- */
 /* Scoped to .pp-protected-page so the rest of the app (dashboard, settings,

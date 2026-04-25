@@ -613,6 +613,7 @@ export default function PayPage() {
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState<number>(Date.now());
   const [checking, setChecking] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [live, setLive] = useState<LiveState>('connecting');
 
   const startedAtRef = useRef<number>(Date.now());
@@ -622,6 +623,16 @@ export default function PayPage() {
   // Hosted-page anti-copy / anti-long-press protection. Mounts capture-phase
   // listeners while the pay page is on screen, removes them on unmount.
   usePayPageAntiCopyProtection(true);
+
+  // Long-press handling for the on-page QR. Both a quick tap and a sustained
+  // long-press trigger the rich download (same flow as the "Download QR
+  // Code" button). The QR wrapper is marked role="button" so the global
+  // anti-long-press hook whitelists it and lets these gestures through.
+  const lpTimerRef = useRef<number | undefined>(undefined);
+  const lpFiredRef = useRef<boolean>(false);
+  const lpStartXY = useRef<{ x: number; y: number } | null>(null);
+  const LP_MS = 450;
+  const LP_MOVE_PX = 10;
 
   // Apply a snapshot, but never let a stale "pending" overwrite a confirmed terminal state.
   const applySnapshot = useCallback((next: PayOrder) => {
@@ -800,6 +811,176 @@ export default function PayPage() {
   const expiresMs = order.expires_at ? new Date(order.expires_at).getTime() - now : 0;
   const showCountdown = order.status === 'pending' && order.expires_at && expiresMs > 0;
 
+  /**
+   * Render a professional QR card to a canvas and trigger a PNG download.
+   * The card embeds the QR served at /api/pay/:token/qr.png plus order
+   * details (merchant, amount, order id, note, expiry, reference).
+   * Pure client-side — no extra server route, no extra dependency.
+   */
+  const downloadQr = async () => {
+    if (!order || downloading) return;
+    setDownloading(true);
+    try {
+      const qrRes = await fetch(`/api/pay/${order.public_token}/qr.png?size=720`);
+      const qrBlob = await qrRes.blob();
+      const qrUrl = URL.createObjectURL(qrBlob);
+      const qrImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = qrUrl;
+      });
+
+      const W = 1080;
+      const H = 1620;
+      const canvas = document.createElement('canvas');
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d')!;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.fillStyle = '#0a0a0f';
+      ctx.fillRect(0, 0, W, 180);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '600 36px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('PG', 64, 90);
+      ctx.font = '500 28px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.fillStyle = '#cfd2dc';
+      ctx.fillText('PayGateway · Secure UPI', 130, 90);
+
+      ctx.fillStyle = '#0a0a0f';
+      ctx.textBaseline = 'top';
+      ctx.font = '700 56px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.fillText(order.payee_name || 'Merchant', 64, 230);
+
+      ctx.fillStyle = '#5b6172';
+      ctx.font = '500 30px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.fillText('Scan to pay with any UPI app', 64, 308);
+
+      ctx.fillStyle = '#0a0a0f';
+      ctx.font = '800 92px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.fillText(`₹${order.amount.toFixed(2)}`, 64, 372);
+      ctx.fillStyle = '#5b6172';
+      ctx.font = '500 28px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.fillText(order.currency || 'INR', 64, 482);
+
+      const qrSize = 720;
+      const qrX = (W - qrSize) / 2;
+      const qrY = 560;
+      ctx.fillStyle = '#eef0f5';
+      ctx.fillRect(qrX - 16, qrY - 16, qrSize + 32, qrSize + 32);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(qrX, qrY, qrSize, qrSize);
+      ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+
+      const detailY = qrY + qrSize + 60;
+      ctx.fillStyle = '#0a0a0f';
+      ctx.font = '600 30px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      const orderRefLabel = order.client_order_id || order.txn_ref;
+      const lines: Array<[string, string]> = [['Order', orderRefLabel]];
+      if (order.note) lines.push(['Note', order.note]);
+      if (order.expires_at) {
+        const exp = new Date(order.expires_at);
+        lines.push(['Expires', exp.toLocaleString()]);
+      }
+      lines.push(['Reference', order.txn_ref]);
+
+      let ly = detailY;
+      for (const [label, value] of lines) {
+        ctx.fillStyle = '#8b91a3';
+        ctx.font = '500 26px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+        ctx.fillText(label, 64, ly);
+        ctx.fillStyle = '#0a0a0f';
+        ctx.font = '600 30px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+        const maxChars = 38;
+        const v = value.length > maxChars ? value.slice(0, maxChars - 1) + '…' : value;
+        ctx.fillText(v, 240, ly - 2);
+        ly += 56;
+      }
+
+      ctx.fillStyle = '#eef0f5';
+      ctx.fillRect(0, H - 80, W, 80);
+      ctx.fillStyle = '#5b6172';
+      ctx.font = '500 24px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Secured by PayGateway', 64, H - 40);
+      ctx.textAlign = 'right';
+      ctx.fillText(order.txn_ref, W - 64, H - 40);
+      ctx.textAlign = 'left';
+
+      const pngBlob: Blob = await new Promise((resolve, reject) => {
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png');
+      });
+      const url = URL.createObjectURL(pngBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `payment-qr-${orderRefLabel}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(qrUrl);
+      }, 1000);
+    } catch {
+      alert('Could not prepare QR download. Please try again.');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  // Cancel any in-flight long-press timer + reset gesture state.
+  const cancelLongPress = () => {
+    if (lpTimerRef.current !== undefined) {
+      window.clearTimeout(lpTimerRef.current);
+      lpTimerRef.current = undefined;
+    }
+    lpStartXY.current = null;
+  };
+
+  const handleQrPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    cancelLongPress();
+    lpFiredRef.current = false;
+    lpStartXY.current = { x: e.clientX, y: e.clientY };
+    lpTimerRef.current = window.setTimeout(() => {
+      lpFiredRef.current = true;
+      lpTimerRef.current = undefined;
+      void downloadQr();
+    }, LP_MS);
+  };
+
+  const handleQrPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const start = lpStartXY.current;
+    if (!start) return;
+    const dx = Math.abs(e.clientX - start.x);
+    const dy = Math.abs(e.clientY - start.y);
+    if (dx > LP_MOVE_PX || dy > LP_MOVE_PX) cancelLongPress();
+  };
+
+  const handleQrPointerEnd = () => cancelLongPress();
+
+  const handleQrClick = () => {
+    // If the long-press already fired, swallow the synthesized click so we
+    // don't trigger the download a second time.
+    if (lpFiredRef.current) {
+      lpFiredRef.current = false;
+      return;
+    }
+    void downloadQr();
+  };
+
+  const handleQrKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      void downloadQr();
+    }
+  };
+
   const orderRefId = order.client_order_id || order.txn_ref;
   const isPending = order.status === 'pending';
 
@@ -855,16 +1036,41 @@ export default function PayPage() {
 
       {isPending && order.upi_payload && (
         <div className="pp-card pp-qr-card">
-          <div className="pp-qr-wrap">
+          <div
+            className={`pp-qr-wrap pp-qr-wrap--interactive${downloading ? ' is-busy' : ''}`}
+            role="button"
+            tabIndex={0}
+            aria-label={downloading ? 'Preparing QR download' : 'Tap or long-press to download payment QR'}
+            aria-busy={downloading || undefined}
+            title="Tap or long-press to download QR"
+            onClick={handleQrClick}
+            onKeyDown={handleQrKeyDown}
+            onPointerDown={handleQrPointerDown}
+            onPointerMove={handleQrPointerMove}
+            onPointerUp={handleQrPointerEnd}
+            onPointerCancel={handleQrPointerEnd}
+            onPointerLeave={handleQrPointerEnd}
+            onContextMenu={(e) => e.preventDefault()}
+          >
             <PayQrCanvas payload={order.upi_payload} size={240} />
           </div>
           <ol className="pp-steps">
             <li>Open any UPI app — GPay, PhonePe, Paytm, BHIM.</li>
-            <li>Scan the QR with your UPI app to pay.</li>
+            <li>Scan the QR with your UPI app, or download it to share.</li>
             <li>Approve <b>₹{order.amount.toFixed(2)}</b>.</li>
             <li>Status updates here automatically.</li>
           </ol>
           <SupportedApps />
+          <div className="pp-actions">
+            <button
+              type="button"
+              className="pp-btn primary"
+              onClick={downloadQr}
+              disabled={downloading}
+            >
+              {downloading ? 'Preparing…' : 'Download QR Code'}
+            </button>
+          </div>
           <div className="pp-poll-row">
             <span className={`pp-dot ${liveClass}`} />
             {liveLabel}
