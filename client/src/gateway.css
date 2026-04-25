@@ -2222,19 +2222,6 @@ code {
   color: var(--gw-text);
   line-height: 1;
 }
-.pp-paid-amount-tag {
-  margin-left: 8px;
-  align-self: center;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--pp-paid-green-2);
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: rgba(var(--pp-paid-green-rgb), 0.12);
-  border: 1px solid rgba(var(--pp-paid-green-rgb), 0.25);
-}
 .pp-paid-meta {
   margin: 6px 0 0;
   font-size: 12px;

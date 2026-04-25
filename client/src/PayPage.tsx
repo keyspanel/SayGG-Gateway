@@ -756,11 +756,10 @@ function PaidStatusVisual({ order }: { order: PayOrder }) {
           />
         ))}
       </div>
-      <h3 className="pp-paid-title">Payment received</h3>
+      <h3 className="pp-paid-title">Payment Received</h3>
       <p className="pp-paid-amount">
         <span className="pp-paid-amount-cur">₹</span>
         <span className="pp-paid-amount-val"><CountUpAmount value={order.amount} /></span>
-        <span className="pp-paid-amount-tag">confirmed</span>
       </p>
       {order.verified_at && (
         <p className="pp-paid-meta">
@@ -1181,13 +1180,26 @@ export default function PayPage() {
       ctx.font = `600 30px ${FONT_STACK}`;
       ctx.fillText('Scan to pay with any UPI app', 64, 310);
 
-      // Amount
+      // Amount + currency on the same baseline so it reads as a single
+      // typographic unit, e.g. "₹1.00inr" — the small lowercase currency
+      // tag sits flush to the right of the amount instead of being
+      // dropped onto its own row below where it looked detached.
       ctx.fillStyle = '#0a0a0f';
+      ctx.textBaseline = 'alphabetic';
       ctx.font = `900 96px ${FONT_STACK}`;
-      ctx.fillText(`₹${order.amount.toFixed(2)}`, 64, 370);
+      const amountText = `₹${order.amount.toFixed(2)}`;
+      const amountX = 64;
+      const amountBaselineY = 466; // visually equivalent to old top:370
+      ctx.fillText(amountText, amountX, amountBaselineY);
+      const amountWidth = ctx.measureText(amountText).width;
+
       ctx.fillStyle = '#5b6172';
-      ctx.font = `600 28px ${FONT_STACK}`;
-      ctx.fillText(order.currency || 'INR', 64, 484);
+      ctx.font = `700 28px ${FONT_STACK}`;
+      const currencyText = (order.currency || 'INR').toLowerCase();
+      // 6px gap, same baseline → currency hugs the right edge of the
+      // amount with the same alphabetic baseline as the rupee glyph.
+      ctx.fillText(currencyText, amountX + amountWidth + 6, amountBaselineY);
+      ctx.textBaseline = 'top'; // restore for the rows below
 
       // QR plate
       const qrSize = 720;
