@@ -390,6 +390,8 @@ a:hover { color: var(--gw-primary-hover); }
   flex-direction: column;
   gap: 16px;
   animation: gw-fade-in 0.28s ease-out;
+  overflow-x: hidden;
+  min-width: 0;
 }
 @keyframes gw-fade-in {
   from { opacity: 0; transform: translateY(4px); }
@@ -979,7 +981,7 @@ a:hover { color: var(--gw-primary-hover); }
   font-weight: 700;
 }
 .gw-base-row code {
-  flex: 1;
+  flex: 1 1 100%;
   padding: 6px 9px;
   min-width: 0;
   font-size: 12.5px;
@@ -987,6 +989,7 @@ a:hover { color: var(--gw-primary-hover); }
   background: transparent;
   border: 0;
   word-break: break-all;
+  overflow-wrap: anywhere;
   font-family: var(--gw-mono);
   color: var(--gw-text);
 }
@@ -1065,6 +1068,7 @@ a:hover { color: var(--gw-primary-hover); }
   white-space: nowrap;
 }
 .gw-params-wrap {
+  max-width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   border: 1px solid var(--gw-border);
@@ -1281,6 +1285,23 @@ code {
   .gw-burger { display: inline-flex; }
   .gw-top-mark { display: inline-flex; }
   .gw-backdrop.open { display: block; opacity: 1; pointer-events: auto; }
+}
+
+/* ============================================
+   DOCS — small screen tweaks
+   ============================================ */
+@media (max-width: 600px) {
+  .gw-card { padding: 14px; }
+  .gw-tabs { padding: 3px; }
+  .gw-tab { padding: 7px 10px; font-size: 12px; }
+  .gw-params { font-size: 12px; }
+  .gw-params th, .gw-params td { padding: 8px 9px; }
+  .gw-code { font-size: 11.5px; padding: 11px 12px; line-height: 1.55; }
+  .gw-copy { padding: 3px 7px; font-size: 10.5px; }
+  .gw-base-row { padding: 4px; gap: 4px; }
+  .gw-base-row b { padding: 5px 8px; font-size: 10px; }
+  .gw-base-row code { font-size: 12px; padding: 5px 8px; }
+  .gw-h4 { margin: 12px 0 5px; }
 }
 
 /* ============================================
