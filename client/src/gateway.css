@@ -1408,60 +1408,87 @@ code {
 
 .pp-qr-card { align-items: stretch; }
 .pp-qr-wrap {
-  position: relative;
   display: flex;
-  flex-direction: column;
-  align-items: center;
   justify-content: center;
-  gap: 8px;
+  align-items: center;
   padding: 14px;
   background: #fff;
   border-radius: 12px;
   align-self: center;
   border: 1px solid var(--gw-border);
-  cursor: pointer;
-  outline: none;
-  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
-  /* Block the native long-press image menu / text-selection on the QR. */
-  -webkit-touch-callout: none;
+}
+
+/* ---------- Hosted-page anti-copy / anti-long-press protection ---------- */
+/* Scoped to .pp-protected-page so the rest of the app (dashboard, settings,
+   docs, etc.) keeps native text selection, copy/paste, drag, etc. intact. */
+.pp-protected-page,
+.pp-protected-page * {
   -webkit-user-select: none;
+  -moz-user-select: none;
   -ms-user-select: none;
   user-select: none;
+  -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
 }
-.pp-qr-wrap:hover { border-color: var(--gw-accent); }
-.pp-qr-wrap:active { transform: scale(0.985); }
-.pp-qr-wrap:focus-visible {
-  border-color: var(--gw-accent);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+.pp-protected-page img,
+.pp-protected-page svg,
+.pp-protected-page canvas {
+  -webkit-user-drag: none;
+  user-drag: none;
+  pointer-events: none;
 }
-.pp-qr-wrap.is-busy { cursor: progress; opacity: 0.85; }
-
-.pp-qr-img {
-  display: block;
-  width: 220px; height: 220px;
-  max-width: 70vw; max-height: 70vw;
-  /* The wrapper handles the gesture; the <img> must NOT be draggable, must
-     not show the iOS callout, and must not capture pointer events itself,
-     otherwise some browsers still raise their native image popup on long-press. */
+.pp-protected-page .pp-protected-media,
+.pp-protected-page .pp-apps-bg {
   pointer-events: none;
   -webkit-user-drag: none;
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
+  user-drag: none;
+  display: inline-block;
+}
+/* Decorative SVG inside a real interactive control still passes clicks
+   through to its parent button (pointer-events:none above). The button
+   itself is whitelisted here so taps and clicks always work. */
+.pp-protected-page button,
+.pp-protected-page [role="button"],
+.pp-protected-page a,
+.pp-protected-page input,
+.pp-protected-page textarea,
+.pp-protected-page select {
+  pointer-events: auto;
+  -webkit-touch-callout: default;
 }
 
-.pp-qr-hint {
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--gw-text-mute);
-  pointer-events: none;
+/* ---------- QR canvas + transparent touch shield ---------- */
+.pp-qr-protected {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
 }
-.pp-qr-wrap:hover .pp-qr-hint,
-.pp-qr-wrap:focus-visible .pp-qr-hint { color: var(--gw-accent); }
+.pp-qr-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 70vw;
+  max-height: 70vw;
+}
+.pp-touch-shield {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: transparent;
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+}
+.pp-qr-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--gw-text-mute);
+  font-size: 13px;
+  font-weight: 600;
+}
 .pp-steps {
   margin: 4px 0 0;
   padding-left: 18px;

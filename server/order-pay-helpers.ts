@@ -59,6 +59,16 @@ export function isExpired(o: OrderRow): boolean {
 }
 
 export function shapeOrder(o: OrderRow, cfg: MerchantCfg | null) {
+  const isTerminal = ['paid', 'failed', 'expired', 'cancelled'].includes(o.status);
+  // Sensitive-data gating for the public hosted-page snapshot:
+  //   - redirect_url is only sent once the order is actually paid.
+  //   - cancel_url is only sent once the order has reached a non-paid
+  //     terminal state (failed / expired / cancelled).
+  // While the order is still pending we never expose either URL to the
+  // browser, since the page wouldn't act on them yet anyway.
+  // callback_url is the server-side webhook and is never sent to the page.
+  const exposeRedirect = o.status === 'paid';
+  const exposeCancel = isTerminal && o.status !== 'paid';
   return {
     public_token: o.public_token,
     txn_ref: o.txn_ref,
@@ -68,21 +78,17 @@ export function shapeOrder(o: OrderRow, cfg: MerchantCfg | null) {
     status: o.status,
     note: o.note,
     payee_name: cfg?.payee_name || 'Merchant',
+    // upi_payload is required by the page itself to render the QR; it is
+    // intentionally still exposed here.
     upi_payload: o.upi_payload,
     created_at: o.created_at,
     expires_at: o.expires_at,
     verified_at: o.verified_at,
-    is_terminal: ['paid', 'failed', 'expired', 'cancelled'].includes(o.status),
+    is_terminal: isTerminal,
     is_expired: isOrderExpiredAt(o.expires_at),
     bank_rrn: o.gateway_bank_txn_id,
-    // Browser redirect targets after the order reaches a terminal state.
-    // Both are intentionally exposed on the public hosted-page snapshot so
-    // the React page can perform the post-payment redirect.
-    //   redirect_url → fired when status === 'paid'
-    //   cancel_url   → fired when status ∈ {failed, expired, cancelled}
-    // callback_url is the server webhook and stays server-only.
-    redirect_url: o.redirect_url,
-    cancel_url: o.cancel_url,
+    redirect_url: exposeRedirect ? o.redirect_url : null,
+    cancel_url: exposeCancel ? o.cancel_url : null,
   };
 }
 
