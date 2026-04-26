@@ -34,21 +34,37 @@ export interface CheckoutFormState {
 }
 
 /**
+ * A snapshot of the last successful PIN-code lookup. The form accepts a
+ * non-canonical city as long as it matches the district India Post returned
+ * for the user's PIN — this lets users in smaller districts that aren't in
+ * our curated list still complete checkout, without giving up the "must be
+ * a real place" guarantee.
+ */
+export interface PinVerified {
+  state: string;
+  city: string;
+}
+
+/**
  * Returns true when every field in the form passes the same validation
  * the user would face on submit. Used to decide whether a returning user
  * with a saved billing profile can skip the details step entirely.
  *
  * State and city are required to be REAL — they must match a canonical
- * Indian state and a city listed under that state. This prevents users
- * from carrying fake address data through to billing.
+ * Indian state + city, OR match a district that India Post confirmed for
+ * the user's PIN. This prevents users from carrying fake address data
+ * through to billing.
  */
-function isFormComplete(f: CheckoutFormState): boolean {
+function isFormComplete(f: CheckoutFormState, pinVerified: PinVerified | null): boolean {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(f.email.trim())) return false;
   if (extractPhoneDigits(f.phone).length !== 10) return false;
   if (f.full_name.trim().length < 2) return false;
   const canonState = canonicalizeState(f.state);
   if (!canonState) return false;
-  if (!canonicalizeCity(f.city, canonState)) return false;
+  const cityTrim = f.city.trim();
+  const canonCity = canonicalizeCity(cityTrim, canonState);
+  const pinOk = !!(pinVerified && pinVerified.state === canonState && pinVerified.city === cityTrim);
+  if (!canonCity && !pinOk) return false;
   if (!/^[1-9][0-9]{5}$/.test(f.postal_code.trim())) return false;
   return true;
 }
@@ -101,6 +117,19 @@ export default function BillingCheckoutDetails() {
   const [err, setErr] = useState('');
   const [errField, setErrField] = useState('');
 
+  // Last successful India Post lookup. Lets the form accept a non-canonical
+  // district (e.g. "Hailakandi") if it matches the PIN the user typed.
+  const [pinVerified, setPinVerified] = useState<PinVerified | null>(null);
+  // Visible status of the most recent PIN lookup, drives the inline pill
+  // shown under the postal code input.
+  type PinStatus =
+    | { kind: 'idle' }
+    | { kind: 'loading' }
+    | { kind: 'ok'; state: string; districts: string[]; chosen: string }
+    | { kind: 'notfound' }
+    | { kind: 'error' };
+  const [pinStatus, setPinStatus] = useState<PinStatus>({ kind: 'idle' });
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -130,27 +159,35 @@ export default function BillingCheckoutDetails() {
         if (isEditing) return;
 
         const profile = meRes.billing_profile || null;
-        // Snap any saved state/city to their canonical spelling so a profile
-        // saved with an old or alternate name still resolves correctly. If
-        // the saved values don't match real entries, drop them so the user
-        // is prompted to pick from the autocomplete.
+        // Snap saved state to canonical spelling. For city, prefer the
+        // canonical version; if the saved city isn't in our list (e.g. a
+        // small district that was previously accepted via PIN lookup), keep
+        // it as-is and seed pinVerified so it still passes validation.
         const canonState = canonicalizeState(profile?.state || '');
-        const canonCity = canonicalizeCity(profile?.city || '', canonState);
+        const rawCity = String(profile?.city || '').trim();
+        const canonCity = canonicalizeCity(rawCity, canonState);
+        let useCity = canonCity;
+        let seededPin: PinVerified | null = null;
+        if (!useCity && rawCity && canonState) {
+          useCity = rawCity;
+          seededPin = { state: canonState, city: rawCity };
+        }
         const prefilled: CheckoutFormState = {
           email: profile?.email || user?.email || '',
           phone: profile?.phone || '',
           full_name: profile?.full_name || '',
           state: canonState,
-          city: canonCity,
+          city: useCity,
           postal_code: profile?.postal_code || '',
         };
         setForm(prefilled);
+        if (seededPin) setPinVerified(seededPin);
 
         // Auto-fill: if the saved profile is fully valid, skip the
         // re-entry step and send the user straight to the confirm page
         // with everything pre-loaded. They can still tap "Edit details"
         // on the confirm page to come back here.
-        if (isFormComplete(prefilled)) {
+        if (isFormComplete(prefilled, seededPin)) {
           nav(`/gateway/billing/checkout/${found.id}/confirm`, {
             replace: true,
             state: { form: prefilled, fee: platformFee, plan: found, autofilled: true },
@@ -166,6 +203,68 @@ export default function BillingCheckoutDetails() {
     return () => { cancelled = true; };
   }, [planId, user?.email, isEditing, nav]);
 
+  // Real-time India Post PIN-code → state/city auto-fill. Whenever the user
+  // types (or pastes) a complete 6-digit PIN, we wait briefly to debounce
+  // their typing and then ask the server proxy to resolve it. On success we
+  // overwrite state + city with the resolved values, and snapshot them so
+  // they pass validation even when the district isn't in our curated list.
+  useEffect(() => {
+    const pin = form.postal_code.trim();
+    if (!/^[1-9][0-9]{5}$/.test(pin)) {
+      // Clear any stale "loading"/"ok" pill — but keep pinVerified, since the
+      // user may temporarily be editing the PIN before retyping it.
+      setPinStatus((p) => (p.kind === 'idle' ? p : { kind: 'idle' }));
+      return;
+    }
+    let aborted = false;
+    setPinStatus({ kind: 'loading' });
+    const timer = setTimeout(async () => {
+      try {
+        const r = await apiGet(`/api/billing/pincode/${pin}`);
+        if (aborted) return;
+        if (!r || !r.ok) {
+          setPinStatus({ kind: 'notfound' });
+          return;
+        }
+        const apiState: string = String(r.state || '');
+        const districts: string[] = Array.isArray(r.districts) ? r.districts.map((d: any) => String(d)) : [];
+        const canonState = canonicalizeState(apiState);
+        if (!canonState || districts.length === 0) {
+          setPinStatus({ kind: 'notfound' });
+          return;
+        }
+        // Prefer a district that exists in our curated city list (gives a
+        // more familiar, cased name); fall back to the first district India
+        // Post returned for this PIN.
+        let chosen = '';
+        for (const d of districts) {
+          const c = canonicalizeCity(d, canonState);
+          if (c) { chosen = c; break; }
+        }
+        if (!chosen) chosen = districts[0];
+        setForm((f) => ({ ...f, state: canonState, city: chosen }));
+        setPinVerified({ state: canonState, city: chosen });
+        setPinStatus({ kind: 'ok', state: canonState, districts, chosen });
+        // Clear any inline form error tied to state/city the moment the PIN
+        // resolves them for us.
+        setErrField((ef) => (ef === 'state' || ef === 'city' ? '' : ef));
+      } catch {
+        if (!aborted) setPinStatus({ kind: 'error' });
+      }
+    }, 350);
+    return () => { aborted = true; clearTimeout(timer); };
+  }, [form.postal_code]);
+
+  // When the user picks a different district from the multi-result list, swap
+  // the city in-place and update the verified snapshot too.
+  const choosePinDistrict = (district: string) => {
+    if (pinStatus.kind !== 'ok') return;
+    const c = canonicalizeCity(district, pinStatus.state) || district;
+    setForm((f) => ({ ...f, city: c }));
+    setPinVerified({ state: pinStatus.state, city: c });
+    setPinStatus({ ...pinStatus, chosen: c });
+  };
+
   const planPrice = plan ? (plan.discount_price ?? plan.price) : 0;
   const total = useMemo(() => Math.round((planPrice + (fee || 0)) * 100) / 100, [planPrice, fee]);
 
@@ -178,8 +277,10 @@ export default function BillingCheckoutDetails() {
     if (form.full_name.trim().length < 2) return { ok: false, field: 'full_name', message: 'Name is required.' };
     const canonState = canonicalizeState(form.state);
     if (!canonState) return { ok: false, field: 'state', message: 'Please pick your state from the list.' };
-    const canonCity = canonicalizeCity(form.city, canonState);
-    if (!canonCity) return { ok: false, field: 'city', message: `Please pick a city in ${canonState} from the list.` };
+    const cityTrim = form.city.trim();
+    const canonCity = canonicalizeCity(cityTrim, canonState);
+    const pinOk = !!(pinVerified && pinVerified.state === canonState && pinVerified.city === cityTrim);
+    if (!canonCity && !pinOk) return { ok: false, field: 'city', message: `Please pick a city in ${canonState} from the list, or enter a PIN to auto-fill it.` };
     if (!/^[1-9][0-9]{5}$/.test(form.postal_code.trim())) return { ok: false, field: 'postal_code', message: 'Indian PIN code must be 6 digits.' };
     return { ok: true };
   };
@@ -193,12 +294,16 @@ export default function BillingCheckoutDetails() {
 
     const canonState = canonicalizeState(form.state);
     const canonCity = canonicalizeCity(form.city, canonState);
+    // If the city isn't in our curated list it must have come through PIN
+    // verification — keep the trimmed user value, which equals the India
+    // Post district name.
+    const finalCity = canonCity || form.city.trim();
     const cleaned: CheckoutFormState = {
       email: form.email.trim().toLowerCase(),
       phone: formatINPhone(extractPhoneDigits(form.phone)),
       full_name: form.full_name.trim(),
       state: canonState,
-      city: canonCity,
+      city: finalCity,
       postal_code: form.postal_code.trim(),
     };
 
@@ -322,14 +427,65 @@ export default function BillingCheckoutDetails() {
                 <span>Postal / ZIP *</span>
                 <input
                   value={form.postal_code}
-                  onChange={(e) => set('postal_code', e.target.value)}
+                  onChange={(e) => {
+                    // Only digits, max 6 — also strips spaces from a pasted PIN.
+                    const next = e.target.value.replace(/\D+/g, '').slice(0, 6);
+                    set('postal_code', next);
+                  }}
                   placeholder="6-digit PIN"
                   maxLength={6}
                   inputMode="numeric"
+                  pattern="[1-9][0-9]{5}"
+                  autoComplete="postal-code"
                   required
                 />
               </label>
             </div>
+
+            {pinStatus.kind === 'loading' && (
+              <div className="gw-pin-status loading" role="status" aria-live="polite">
+                <span className="gw-pin-spin" aria-hidden="true" />
+                <span>Looking up PIN {form.postal_code}…</span>
+              </div>
+            )}
+            {pinStatus.kind === 'ok' && (
+              <div className="gw-pin-status ok" role="status" aria-live="polite">
+                <svg className="gw-pin-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+                <span>
+                  Auto-filled from PIN <b>{form.postal_code}</b> • {pinStatus.state} • {pinStatus.chosen}
+                </span>
+                {pinStatus.districts.length > 1 && (
+                  <span className="gw-pin-alts">
+                    <span className="gw-pin-alts-lbl">Other matches:</span>
+                    {pinStatus.districts
+                      .filter((d) => d.toLowerCase() !== pinStatus.chosen.toLowerCase())
+                      .slice(0, 3)
+                      .map((d) => (
+                        <button
+                          key={d}
+                          type="button"
+                          className="gw-pin-chip"
+                          onClick={() => choosePinDistrict(d)}
+                        >
+                          {d}
+                        </button>
+                      ))}
+                  </span>
+                )}
+              </div>
+            )}
+            {pinStatus.kind === 'notfound' && (
+              <div className="gw-pin-status warn" role="status" aria-live="polite">
+                No postal records for this PIN — please pick state and city manually.
+              </div>
+            )}
+            {pinStatus.kind === 'error' && (
+              <div className="gw-pin-status warn" role="status" aria-live="polite">
+                PIN lookup is unavailable — please pick state and city manually.
+              </div>
+            )}
 
           <div className="gw-checkout-actions">
             <Link to="/gateway/billing" className="gw-btn-ghost">Cancel</Link>

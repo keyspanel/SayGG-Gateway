@@ -261,6 +261,35 @@ export function canonicalizeState(raw: string): string {
   return '';
 }
 
+/**
+ * Well-known city renames / English aliases. Keyed by lowercase alias →
+ * current official name. Used by `canonicalizeCity` so that a value coming
+ * from India Post (which often returns the older English form, e.g.
+ * "Bangalore") snaps to the modern canonical entry in CITIES_BY_STATE.
+ */
+const CITY_ALIASES: Readonly<Record<string, string>> = {
+  'bangalore': 'Bengaluru',
+  'bombay': 'Mumbai',
+  'calcutta': 'Kolkata',
+  'madras': 'Chennai',
+  'mysore': 'Mysuru',
+  'cochin': 'Kochi',
+  'trivandrum': 'Thiruvananthapuram',
+  'gurgaon': 'Gurugram',
+  'allahabad': 'Prayagraj',
+  'pondicherry': 'Puducherry',
+  'baroda': 'Vadodara',
+  'poona': 'Pune',
+  'kanpur nagar': 'Kanpur',
+  'lucknow nagar': 'Lucknow',
+  'tuticorin': 'Thoothukudi',
+  'ootacamund': 'Udhagamandalam',
+  'belgavi': 'Belgaum',
+  'kalaburagi': 'Gulbarga',
+  'ballari': 'Ballari',
+  'vijayapura': 'Vijayapura',
+};
+
 /** Case-insensitive canonicaliser for a city within a given state. */
 export function canonicalizeCity(rawCity: string, canonState: string): string {
   const trimmed = (rawCity || '').trim();
@@ -269,5 +298,11 @@ export function canonicalizeCity(rawCity: string, canonState: string): string {
   if (!list) return '';
   const lc = trimmed.toLowerCase();
   for (const c of list) if (c.toLowerCase() === lc) return c;
+  // Try alias resolution (e.g. "Bangalore" → "Bengaluru") and re-match.
+  const aliased = CITY_ALIASES[lc];
+  if (aliased) {
+    const aliasedLc = aliased.toLowerCase();
+    for (const c of list) if (c.toLowerCase() === aliasedLc) return c;
+  }
   return '';
 }

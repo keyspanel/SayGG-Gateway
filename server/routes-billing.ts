@@ -178,6 +178,112 @@ router.post('/profile', gwSession, async (req: GwSessionRequest, res: Response) 
 
 router.all('/profile', methodNotAllowed(['GET','POST']));
 
+/* -------------------------------------------------------------------------- */
+/* Indian PIN code lookup                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Server-side proxy + cache for India Post's free PIN-code lookup. Avoids
+ * exposing the external dependency to the browser (CORS, retries) and lets
+ * us cache aggressively — postal codes are essentially static data.
+ *
+ * On success we return `{ ok: true, state, districts }`. `districts` is the
+ * de-duplicated list of districts the API knows for that PIN (most PINs
+ * resolve to a single district, but a few border PINs span two).
+ */
+
+interface PinCacheEntry {
+  ok: boolean;
+  state: string;
+  districts: string[];
+  expires_at: number;
+}
+const pinCache = new Map<string, PinCacheEntry>();
+const PIN_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const PIN_CACHE_MAX = 5000;
+
+function pinCacheGet(pin: string): PinCacheEntry | null {
+  const hit = pinCache.get(pin);
+  if (!hit) return null;
+  if (hit.expires_at < Date.now()) { pinCache.delete(pin); return null; }
+  return hit;
+}
+function pinCachePut(pin: string, entry: Omit<PinCacheEntry, 'expires_at'>) {
+  if (pinCache.size >= PIN_CACHE_MAX) {
+    // Evict oldest insertion (Map preserves insertion order).
+    const firstKey = pinCache.keys().next().value;
+    if (firstKey) pinCache.delete(firstKey);
+  }
+  pinCache.set(pin, { ...entry, expires_at: Date.now() + PIN_CACHE_TTL_MS });
+}
+
+const pinLookupLimiter = rateLimit({
+  name: 'billing_pincode',
+  windowMs: 60_000,
+  max: 60,
+  scope: (req) => clientIp(req),
+  message: 'Too many PIN lookups. Please slow down.',
+  code: 'RATE_LIMITED',
+});
+
+router.get('/pincode/:pin', pinLookupLimiter, async (req: Request, res: Response) => {
+  const pin = String(req.params.pin || '').trim();
+  if (!/^[1-9][0-9]{5}$/.test(pin)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_PIN', message: 'Enter a valid 6-digit Indian PIN code.' });
+  }
+
+  const cached = pinCacheGet(pin);
+  if (cached) {
+    return res.json({ ok: cached.ok, state: cached.state, districts: cached.districts, cached: true });
+  }
+
+  // Network call to India Post's public lookup. Strict timeout so a slow
+  // upstream never blocks the form for more than a couple of seconds.
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), 4000);
+  try {
+    const r = await fetch(`https://api.postalpincode.in/pincode/${pin}`, {
+      signal: ac.signal,
+      headers: { 'Accept': 'application/json', 'User-Agent': 'gateway-pin-lookup/1.0' },
+    });
+    clearTimeout(t);
+    if (!r.ok) throw new Error(`upstream ${r.status}`);
+    const body = await r.json() as Array<{ Status?: string; PostOffice?: Array<{ State?: string; District?: string }> | null }>;
+    const first = Array.isArray(body) ? body[0] : null;
+    const status = String(first?.Status || '').toLowerCase();
+    const offices = Array.isArray(first?.PostOffice) ? first!.PostOffice! : [];
+    if (status !== 'success' || offices.length === 0) {
+      const empty = { ok: false, state: '', districts: [] };
+      pinCachePut(pin, empty);
+      return res.json({ ...empty, message: 'No postal records found for this PIN.' });
+    }
+    // Use the most-common state among returned offices (defensive — the API
+    // generally returns a single state per PIN, but border PINs can mix).
+    const stateCount = new Map<string, number>();
+    for (const o of offices) {
+      const s = String(o.State || '').trim();
+      if (!s) continue;
+      stateCount.set(s, (stateCount.get(s) || 0) + 1);
+    }
+    let bestState = ''; let bestCount = 0;
+    for (const [s, c] of stateCount) if (c > bestCount) { bestState = s; bestCount = c; }
+    const districts = Array.from(new Set(
+      offices
+        .filter((o) => String(o.State || '').trim() === bestState)
+        .map((o) => String(o.District || '').trim())
+        .filter(Boolean),
+    ));
+    const entry = { ok: true, state: bestState, districts };
+    pinCachePut(pin, entry);
+    return res.json({ ...entry, cached: false });
+  } catch (err: any) {
+    clearTimeout(t);
+    // Don't cache failures — the upstream may just be flaky.
+    return res.status(502).json({ ok: false, code: 'UPSTREAM_UNAVAILABLE', message: 'PIN lookup is temporarily unavailable.' });
+  }
+});
+router.all('/pincode/:pin', methodNotAllowed(['GET']));
+
 function shapeSubscriptionOrder(o: any, includeUpi = false, opts: { origin?: string } = {}) {
   const isTerminal = ['paid', 'failed', 'expired', 'cancelled'].includes(o.status);
   const isExpiredNow = !!(o.expires_at && new Date(o.expires_at).getTime() < Date.now());

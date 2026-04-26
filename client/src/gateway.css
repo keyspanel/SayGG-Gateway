@@ -2949,6 +2949,73 @@ code {
   color: var(--gw-text-soft);
 }
 
+/* India Post PIN-code lookup status pill, sits below the postal_code input */
+.gw-pin-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 2px 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  border: 1px solid transparent;
+}
+.gw-pin-status b { font-weight: 700; }
+.gw-pin-status.loading {
+  color: var(--gw-text-soft);
+  background: color-mix(in srgb, var(--gw-surface) 70%, var(--gw-border) 30%);
+  border-color: var(--gw-border);
+}
+.gw-pin-status.ok {
+  color: var(--gw-ok-text, #065f46);
+  background: color-mix(in srgb, var(--gw-ok, #10b981) 12%, var(--gw-surface) 88%);
+  border-color: color-mix(in srgb, var(--gw-ok, #10b981) 35%, transparent);
+}
+.gw-pin-status.warn {
+  color: var(--gw-text-soft);
+  background: color-mix(in srgb, var(--gw-warn, #f59e0b) 10%, var(--gw-surface) 90%);
+  border-color: color-mix(in srgb, var(--gw-warn, #f59e0b) 30%, transparent);
+}
+.gw-pin-icon { flex: 0 0 auto; color: var(--gw-ok, #10b981); }
+.gw-pin-spin {
+  flex: 0 0 auto;
+  width: 14px; height: 14px;
+  border: 2px solid color-mix(in srgb, var(--gw-text-soft) 35%, transparent);
+  border-top-color: var(--gw-primary);
+  border-radius: 50%;
+  animation: gw-pin-spin 0.7s linear infinite;
+}
+@keyframes gw-pin-spin { to { transform: rotate(360deg); } }
+.gw-pin-alts {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: 4px;
+}
+.gw-pin-alts-lbl { color: var(--gw-text-soft); font-size: 12px; }
+.gw-pin-chip {
+  appearance: none;
+  border: 1px solid var(--gw-border);
+  background: var(--gw-surface);
+  color: var(--gw-text);
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.gw-pin-chip:hover {
+  background: color-mix(in srgb, var(--gw-primary) 8%, var(--gw-surface) 92%);
+  border-color: var(--gw-primary);
+  color: var(--gw-primary);
+}
+:root[data-theme="dark"] .gw-pin-status.ok { color: #6ee7b7; }
+:root[data-theme="dark"] .gw-pin-status.warn { color: #fbbf24; }
+
 .gw-city-list {
   position: absolute;
   z-index: 20;
