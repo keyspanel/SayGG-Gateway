@@ -33,11 +33,29 @@ export interface CheckoutFormState {
  */
 function isFormComplete(f: CheckoutFormState): boolean {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(f.email.trim())) return false;
-  if (!/^[\+]?[0-9\-\s\(\)]{6,40}$/.test(f.phone.trim())) return false;
+  if (extractPhoneDigits(f.phone).length !== 10) return false;
   if (f.full_name.trim().length < 2) return false;
   if (f.city.trim().length < 2) return false;
   if (!/^[1-9][0-9]{5}$/.test(f.postal_code.trim())) return false;
   return true;
+}
+
+/**
+ * Extracts the 10-digit Indian mobile number out of any string the user
+ * (or an older saved profile) may have given us — strips +91 / 91 country
+ * codes, spaces, dashes, and parens. Returns at most 10 digits.
+ */
+function extractPhoneDigits(raw: string): string {
+  let digits = (raw || '').replace(/\D/g, '');
+  // If the user typed the country code, drop it so we never end up storing
+  // it twice when we re-add the +91 prefix on submit.
+  if (digits.length > 10 && digits.startsWith('91')) digits = digits.slice(2);
+  return digits.slice(0, 10);
+}
+
+/** Formats the stored phone value with the fixed +91 prefix. */
+function formatINPhone(digits: string): string {
+  return digits ? `+91 ${digits}` : '';
 }
 
 export default function BillingCheckoutDetails() {
@@ -134,7 +152,8 @@ export default function BillingCheckoutDetails() {
 
   const validate = (): { ok: boolean; field?: string; message?: string } => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email.trim())) return { ok: false, field: 'email', message: 'Enter a valid email address.' };
-    if (!/^[\+]?[0-9\-\s\(\)]{6,40}$/.test(form.phone.trim())) return { ok: false, field: 'phone', message: 'Mobile number looks invalid.' };
+    const phoneDigits = extractPhoneDigits(form.phone);
+    if (phoneDigits.length !== 10) return { ok: false, field: 'phone', message: 'Enter a 10-digit mobile number.' };
     if (form.full_name.trim().length < 2) return { ok: false, field: 'full_name', message: 'Name is required.' };
     if (form.city.trim().length < 2) return { ok: false, field: 'city', message: 'City is required.' };
     if (!/^[1-9][0-9]{5}$/.test(form.postal_code.trim())) return { ok: false, field: 'postal_code', message: 'Indian PIN code must be 6 digits.' };
@@ -150,7 +169,7 @@ export default function BillingCheckoutDetails() {
 
     const cleaned: CheckoutFormState = {
       email: form.email.trim().toLowerCase(),
-      phone: form.phone.trim(),
+      phone: formatINPhone(extractPhoneDigits(form.phone)),
       full_name: form.full_name.trim(),
       city: form.city.trim(),
       postal_code: form.postal_code.trim(),
@@ -181,7 +200,7 @@ export default function BillingCheckoutDetails() {
     <div className="gw-page gw-checkout">
       <CheckoutSteps current={1} />
 
-      <CheckoutSummaryMini plan={plan} planPrice={planPrice} fee={fee} total={total} />
+      <CheckoutSummaryMini plan={plan} planPrice={planPrice} fee={fee} total={total} hideTrustFooter />
 
       <div className="gw-card gw-checkout-form-card">
         <div className="gw-card-h">
@@ -195,27 +214,46 @@ export default function BillingCheckoutDetails() {
 
         <form className="gw-billing-form" onSubmit={onSubmit} noValidate>
             <label className={errField === 'email' ? 'err' : ''}>
-              <span>Gmail / Email *</span>
+              <span>
+                Gmail / Email *
+                <span className="gw-field-hint" aria-hidden="true">From your account</span>
+              </span>
               <input
                 type="email"
                 value={form.email}
-                onChange={(e) => set('email', e.target.value)}
                 placeholder="you@gmail.com"
                 maxLength={255}
-                autoFocus
+                readOnly
+                aria-readonly="true"
+                title="This email is linked to your account and can't be changed here."
+                className="gw-input-locked"
                 required
               />
             </label>
             <label className={errField === 'phone' ? 'err' : ''}>
               <span>Mobile number *</span>
-              <input
-                value={form.phone}
-                onChange={(e) => set('phone', e.target.value)}
-                placeholder="+91 98xxxxxxxx"
-                maxLength={40}
-                inputMode="tel"
-                required
-              />
+              <div className="gw-phone-input">
+                <span className="gw-phone-prefix" aria-hidden="true">+91</span>
+                <input
+                  value={extractPhoneDigits(form.phone)}
+                  onChange={(e) => {
+                    const digits = extractPhoneDigits(e.target.value);
+                    set('phone', formatINPhone(digits));
+                  }}
+                  onPaste={(e) => {
+                    e.preventDefault();
+                    const text = e.clipboardData.getData('text');
+                    const digits = extractPhoneDigits(text);
+                    set('phone', formatINPhone(digits));
+                  }}
+                  placeholder="98xxxxxxxx"
+                  maxLength={10}
+                  inputMode="numeric"
+                  autoComplete="tel-national"
+                  aria-label="Mobile number, 10 digits, India"
+                  required
+                />
+              </div>
             </label>
             <label className={errField === 'full_name' ? 'err' : ''}>
               <span>Name *</span>
@@ -269,7 +307,7 @@ export default function BillingCheckoutDetails() {
  * so those fields are optional and degrade gracefully.
  */
 export function CheckoutSummaryMini({
-  plan, planPrice, fee, total,
+  plan, planPrice, fee, total, hideTrustFooter = false,
 }: {
   plan: {
     name: string;
@@ -284,6 +322,7 @@ export function CheckoutSummaryMini({
   planPrice: number;
   fee: number;
   total: number;
+  hideTrustFooter?: boolean;
 }) {
   const duration = plan.duration_days >= 200 ? '1 year' : `${plan.duration_days} days`;
   const list = (plan.features || []).filter(Boolean).slice(0, 4);
@@ -396,31 +435,33 @@ export function CheckoutSummaryMini({
         </div>
       </div>
 
-      <footer className="gw-co-mini-foot">
-        <span className="gw-co-mini-trust">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <rect x="4" y="11" width="16" height="10" rx="2" />
-            <path d="M8 11V8a4 4 0 018 0v3" />
-          </svg>
-          Secure SSL checkout
-        </span>
-        <span className="gw-co-mini-trust-sep" aria-hidden="true">·</span>
-        <span className="gw-co-mini-trust">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z" />
-          </svg>
-          Encrypted payment
-        </span>
-        <span className="gw-co-mini-trust-sep" aria-hidden="true">·</span>
-        <span className="gw-co-mini-trust">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M21 8v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8" />
-            <path d="M3 8l9 6 9-6" />
-            <path d="M3 8a2 2 0 012-2h14a2 2 0 012 2" />
-          </svg>
-          Receipt emailed
-        </span>
-      </footer>
+      {!hideTrustFooter && (
+        <footer className="gw-co-mini-foot">
+          <span className="gw-co-mini-trust">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="4" y="11" width="16" height="10" rx="2" />
+              <path d="M8 11V8a4 4 0 018 0v3" />
+            </svg>
+            Secure SSL checkout
+          </span>
+          <span className="gw-co-mini-trust-sep" aria-hidden="true">·</span>
+          <span className="gw-co-mini-trust">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z" />
+            </svg>
+            Encrypted payment
+          </span>
+          <span className="gw-co-mini-trust-sep" aria-hidden="true">·</span>
+          <span className="gw-co-mini-trust">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 8v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8" />
+              <path d="M3 8l9 6 9-6" />
+              <path d="M3 8a2 2 0 012-2h14a2 2 0 012 2" />
+            </svg>
+            Receipt emailed
+          </span>
+        </footer>
+      )}
     </section>
   );
 }

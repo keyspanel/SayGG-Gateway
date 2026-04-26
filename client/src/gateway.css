@@ -2831,6 +2831,78 @@ code {
   border-color: #dc2626;
   box-shadow: 0 0 0 3px rgba(220,38,38,0.15);
 }
+
+/* Inline hint shown next to a field label (e.g. "From your account"). */
+.gw-billing-form label > span {
+  display: inline-flex; align-items: center; gap: 8px;
+  flex-wrap: wrap;
+}
+.gw-field-hint {
+  font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--gw-text-mute);
+  background: var(--gw-surface-2);
+  border: 1px solid var(--gw-border);
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+
+/* Locked / read-only input (e.g. account email that can't be changed). */
+.gw-billing-form input.gw-input-locked,
+.gw-billing-form input[readonly] {
+  background: var(--gw-surface-2);
+  color: var(--gw-text-soft);
+  cursor: not-allowed;
+}
+.gw-billing-form input.gw-input-locked:focus {
+  border-color: var(--gw-border);
+  box-shadow: none;
+  background: var(--gw-surface-2);
+}
+
+/* Phone input with a fixed +91 country-code prefix on the left. */
+.gw-phone-input {
+  position: relative;
+  display: flex; align-items: stretch;
+  background: var(--gw-surface-2);
+  border: 1px solid var(--gw-border);
+  border-radius: 9px;
+  overflow: hidden;
+  transition: border-color .12s ease, box-shadow .12s ease, background-color .12s ease;
+}
+.gw-phone-input:focus-within {
+  border-color: var(--gw-primary);
+  box-shadow: 0 0 0 3px var(--gw-primary-soft);
+  background: var(--gw-surface);
+}
+.gw-billing-form label.err .gw-phone-input {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220,38,38,0.15);
+}
+.gw-phone-prefix {
+  display: inline-flex; align-items: center;
+  padding: 0 12px;
+  font-size: 14px; font-weight: 700;
+  color: var(--gw-text-soft);
+  background: var(--gw-surface-hover);
+  border-right: 1px solid var(--gw-border);
+  user-select: none;
+  letter-spacing: 0.01em;
+}
+.gw-billing-form .gw-phone-input input {
+  flex: 1 1 auto;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 10px 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.gw-billing-form .gw-phone-input input:focus {
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
 .gw-form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
