@@ -2,7 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { apiGet, ApiError } from './api';
 import { useGwAuth } from './AuthCtx';
-import { INDIAN_CITIES } from './indianCities';
+import {
+  INDIAN_STATES,
+  CITIES_BY_STATE,
+  canonicalizeState,
+  canonicalizeCity,
+} from './indiaGeo';
 
 interface Plan {
   id: number;
@@ -23,6 +28,7 @@ export interface CheckoutFormState {
   email: string;
   phone: string;
   full_name: string;
+  state: string;
   city: string;
   postal_code: string;
 }
@@ -31,12 +37,18 @@ export interface CheckoutFormState {
  * Returns true when every field in the form passes the same validation
  * the user would face on submit. Used to decide whether a returning user
  * with a saved billing profile can skip the details step entirely.
+ *
+ * State and city are required to be REAL — they must match a canonical
+ * Indian state and a city listed under that state. This prevents users
+ * from carrying fake address data through to billing.
  */
 function isFormComplete(f: CheckoutFormState): boolean {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(f.email.trim())) return false;
   if (extractPhoneDigits(f.phone).length !== 10) return false;
   if (f.full_name.trim().length < 2) return false;
-  if (f.city.trim().length < 2) return false;
+  const canonState = canonicalizeState(f.state);
+  if (!canonState) return false;
+  if (!canonicalizeCity(f.city, canonState)) return false;
   if (!/^[1-9][0-9]{5}$/.test(f.postal_code.trim())) return false;
   return true;
 }
@@ -82,6 +94,7 @@ export default function BillingCheckoutDetails() {
     email: incoming?.form?.email || '',
     phone: incoming?.form?.phone || '',
     full_name: incoming?.form?.full_name || '',
+    state: incoming?.form?.state || '',
     city: incoming?.form?.city || '',
     postal_code: incoming?.form?.postal_code || '',
   });
@@ -117,11 +130,18 @@ export default function BillingCheckoutDetails() {
         if (isEditing) return;
 
         const profile = meRes.billing_profile || null;
+        // Snap any saved state/city to their canonical spelling so a profile
+        // saved with an old or alternate name still resolves correctly. If
+        // the saved values don't match real entries, drop them so the user
+        // is prompted to pick from the autocomplete.
+        const canonState = canonicalizeState(profile?.state || '');
+        const canonCity = canonicalizeCity(profile?.city || '', canonState);
         const prefilled: CheckoutFormState = {
           email: profile?.email || user?.email || '',
           phone: profile?.phone || '',
           full_name: profile?.full_name || '',
-          city: profile?.city || '',
+          state: canonState,
+          city: canonCity,
           postal_code: profile?.postal_code || '',
         };
         setForm(prefilled);
@@ -156,7 +176,10 @@ export default function BillingCheckoutDetails() {
     const phoneDigits = extractPhoneDigits(form.phone);
     if (phoneDigits.length !== 10) return { ok: false, field: 'phone', message: 'Enter a 10-digit mobile number.' };
     if (form.full_name.trim().length < 2) return { ok: false, field: 'full_name', message: 'Name is required.' };
-    if (form.city.trim().length < 2) return { ok: false, field: 'city', message: 'City is required.' };
+    const canonState = canonicalizeState(form.state);
+    if (!canonState) return { ok: false, field: 'state', message: 'Please pick your state from the list.' };
+    const canonCity = canonicalizeCity(form.city, canonState);
+    if (!canonCity) return { ok: false, field: 'city', message: `Please pick a city in ${canonState} from the list.` };
     if (!/^[1-9][0-9]{5}$/.test(form.postal_code.trim())) return { ok: false, field: 'postal_code', message: 'Indian PIN code must be 6 digits.' };
     return { ok: true };
   };
@@ -168,11 +191,14 @@ export default function BillingCheckoutDetails() {
     if (!v.ok) { setErr(v.message || 'Please check the form.'); setErrField(v.field || ''); return; }
     if (!plan) return;
 
+    const canonState = canonicalizeState(form.state);
+    const canonCity = canonicalizeCity(form.city, canonState);
     const cleaned: CheckoutFormState = {
       email: form.email.trim().toLowerCase(),
       phone: formatINPhone(extractPhoneDigits(form.phone)),
       full_name: form.full_name.trim(),
-      city: form.city.trim(),
+      state: canonState,
+      city: canonCity,
       postal_code: form.postal_code.trim(),
     };
 
@@ -267,12 +293,29 @@ export default function BillingCheckoutDetails() {
               <span>Country</span>
               <input value="India" disabled readOnly />
             </label>
+            <label className={errField === 'state' ? 'err' : ''}>
+              <span>State *</span>
+              <StateInput
+                value={form.state}
+                onChange={(v) => {
+                  // Switching state must clear any previously-typed city,
+                  // otherwise the user could end up with a "Mumbai" from
+                  // Maharashtra still showing while Kerala is selected.
+                  setForm((f) => ({
+                    ...f,
+                    state: v,
+                    city: canonicalizeCity(f.city, canonicalizeState(v)),
+                  }));
+                }}
+              />
+            </label>
             <div className="gw-form-row">
               <label className={errField === 'city' ? 'err' : ''}>
                 <span>City *</span>
                 <CityInput
                   value={form.city}
                   onChange={(v) => set('city', v)}
+                  state={canonicalizeState(form.state)}
                 />
               </label>
               <label className={errField === 'postal_code' ? 'err' : ''}>
@@ -475,18 +518,33 @@ function labelMethod(m: string) {
 }
 
 /**
- * City input with a polished autocomplete dropdown over a curated list of
- * Indian cities. Filters by prefix-first then substring, highlights the
- * matched portion, and supports full keyboard navigation. The user can
- * still type any free-text city — we never block their typing, suggestions
- * are only an aid.
+ * Shared geography autocomplete used by both the State and City pickers.
+ * Filters a fixed source list by prefix-first then substring, highlights
+ * the matched portion, supports full keyboard navigation, and — critically
+ * — when the input is empty + focused it shows the full list so the user
+ * can browse and pick. Free-typed values are not validated here; the form's
+ * `validate()` rejects anything not on the canonical list before submit.
  */
-function CityInput({
+function GeoAutocomplete({
   value,
   onChange,
+  source,
+  disabled,
+  placeholder,
+  emptyLabel,
+  ariaLabel,
+  autoComplete,
+  iconKind,
 }: {
   value: string;
   onChange: (v: string) => void;
+  source: readonly string[];
+  disabled?: boolean;
+  placeholder: string;
+  emptyLabel: string;
+  ariaLabel: string;
+  autoComplete: string;
+  iconKind: 'pin' | 'flag';
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -497,20 +555,21 @@ function CityInput({
   const q = value.trim().toLowerCase();
 
   const matches = useMemo(() => {
-    if (!q) return [];
+    // Empty input + open dropdown → show the first slice of the full list
+    // so the user can simply browse without having to guess a starting letter.
+    if (!q) return source.slice(0, 8);
     const starts: string[] = [];
     const contains: string[] = [];
-    for (const c of INDIAN_CITIES) {
+    for (const c of source) {
       const lc = c.toLowerCase();
-      if (lc === q) continue;
       if (lc.startsWith(q)) starts.push(c);
       else if (lc.includes(q)) contains.push(c);
       if (starts.length >= 8) break;
     }
     return [...starts, ...contains].slice(0, 8);
-  }, [q]);
+  }, [q, source]);
 
-  const showList = open && matches.length > 0;
+  const showList = open && !disabled && matches.length > 0;
 
   // Close the dropdown when the user clicks anywhere outside the wrapper.
   useEffect(() => {
@@ -536,8 +595,8 @@ function CityInput({
     if (node) node.scrollIntoView({ block: 'nearest' });
   }, [active]);
 
-  const select = (city: string) => {
-    onChange(city);
+  const select = (item: string) => {
+    onChange(item);
     setOpen(false);
     setActive(-1);
     // Move focus back to the input so the user can keep tabbing through the form.
@@ -545,6 +604,7 @@ function CityInput({
   };
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (disabled) return;
     if (e.key === 'ArrowDown') {
       if (!showList && matches.length) { setOpen(true); setActive(0); e.preventDefault(); return; }
       if (showList) { setActive((a) => Math.min(matches.length - 1, a + 1)); e.preventDefault(); }
@@ -577,30 +637,42 @@ function CityInput({
     );
   };
 
+  const PinIcon = (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z" />
+      <circle cx="12" cy="9.5" r="2.5" />
+    </svg>
+  );
+  const FlagIcon = (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 22V4" />
+      <path d="M4 4h13l-2 4 2 4H4" />
+    </svg>
+  );
+  const HeaderIcon = iconKind === 'flag' ? FlagIcon : PinIcon;
+
   return (
-    <div className={`gw-city-wrap${showList ? ' open' : ''}`} ref={wrapRef}>
+    <div className={`gw-city-wrap${showList ? ' open' : ''}${disabled ? ' is-disabled' : ''}`} ref={wrapRef}>
       <div className="gw-city-field">
-        <span className="gw-city-icon" aria-hidden="true">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z" />
-            <circle cx="12" cy="9.5" r="2.5" />
-          </svg>
-        </span>
+        <span className="gw-city-icon" aria-hidden="true">{HeaderIcon}</span>
         <input
           ref={inputRef}
           value={value}
-          onChange={(e) => { onChange(e.target.value); setOpen(true); setActive(-1); }}
-          onFocus={() => setOpen(true)}
+          onChange={(e) => { if (disabled) return; onChange(e.target.value); setOpen(true); setActive(-1); }}
+          onFocus={() => { if (!disabled) setOpen(true); }}
           onKeyDown={onKey}
-          placeholder="Start typing your city"
+          placeholder={placeholder}
           maxLength={120}
-          autoComplete="address-level2"
+          autoComplete={autoComplete}
           spellCheck={false}
           role="combobox"
+          aria-label={ariaLabel}
           aria-autocomplete="list"
           aria-expanded={showList}
           aria-controls="gw-city-listbox"
           aria-activedescendant={showList && active >= 0 ? `gw-city-opt-${active}` : undefined}
+          aria-disabled={disabled || undefined}
+          disabled={disabled}
           required
         />
       </div>
@@ -622,17 +694,67 @@ function CityInput({
               onMouseDown={(e) => { e.preventDefault(); select(c); }}
               onMouseEnter={() => setActive(i)}
             >
-              <svg className="gw-city-opt-pin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z" />
-                <circle cx="12" cy="9.5" r="2.5" />
-              </svg>
+              <span className="gw-city-opt-pin">{iconKind === 'flag' ? FlagIcon : PinIcon}</span>
               <span className="gw-city-opt-name">{renderMatch(c)}</span>
               <span className="gw-city-opt-tag">India</span>
             </li>
           ))}
         </ul>
       )}
+      {disabled && (
+        <p className="gw-city-hint">{emptyLabel}</p>
+      )}
     </div>
+  );
+}
+
+/**
+ * State picker — autocomplete bound to the canonical INDIAN_STATES list.
+ * Required to be picked from the list; free-typed values won't pass the
+ * form's `validate()` step.
+ */
+function StateInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <GeoAutocomplete
+      value={value}
+      onChange={onChange}
+      source={INDIAN_STATES}
+      placeholder="Start typing your state"
+      emptyLabel=""
+      ariaLabel="State"
+      autoComplete="address-level1"
+      iconKind="flag"
+    />
+  );
+}
+
+/**
+ * City picker — autocomplete bound to the cities of the currently-selected
+ * state. Disabled until a state is chosen, since the city list is meaningless
+ * without one. Required to be picked from the list.
+ */
+function CityInput({
+  value,
+  onChange,
+  state,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  state: string;
+}) {
+  const source = state ? (CITIES_BY_STATE[state] || []) : [];
+  return (
+    <GeoAutocomplete
+      value={value}
+      onChange={onChange}
+      source={source}
+      disabled={!state}
+      placeholder={state ? `Start typing a city in ${state}` : 'Select a state first'}
+      emptyLabel="Pick your state above to see matching cities."
+      ariaLabel="City"
+      autoComplete="address-level2"
+      iconKind="pin"
+    />
   );
 }
 

@@ -54,6 +54,7 @@ export default function BillingCheckoutConfirm() {
         email: form.email,
         phone: form.phone,
         country: 'IN',
+        state: form.state,
         city: form.city,
         postal_code: form.postal_code,
       });
@@ -120,6 +121,7 @@ export default function BillingCheckoutConfirm() {
             <div><span>Mobile</span><b>{form.phone}</b></div>
             <div><span>Country</span><b>India</b></div>
             <div><span>City</span><b>{form.city}</b></div>
+            <div><span>State</span><b>{form.state}</b></div>
             <div><span>Postal / ZIP</span><b>{form.postal_code}</b></div>
           </div>
         </div>

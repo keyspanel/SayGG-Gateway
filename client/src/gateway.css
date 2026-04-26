@@ -2931,6 +2931,23 @@ code {
   box-shadow: none;
   background: transparent;
 }
+.gw-billing-form .gw-city-field input:disabled {
+  cursor: not-allowed;
+  color: var(--gw-text-soft);
+  -webkit-text-fill-color: var(--gw-text-soft);
+  opacity: 1;
+}
+.gw-city-wrap.is-disabled .gw-city-field {
+  background: color-mix(in srgb, var(--gw-surface) 80%, var(--gw-border) 20%);
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+.gw-city-wrap.is-disabled .gw-city-icon { opacity: 0.55; }
+.gw-city-hint {
+  margin: 6px 2px 0;
+  font-size: 12px;
+  color: var(--gw-text-soft);
+}
 
 .gw-city-list {
   position: absolute;
