@@ -36,6 +36,132 @@ function shapePlan(p: any) {
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/* Billing profile (required before checkout)                                  */
+/* -------------------------------------------------------------------------- */
+
+const SUPPORTED_COUNTRIES = ['IN','US','GB','AE','SG','CA','AU','DE','FR','NL','JP','OT'];
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+interface BillingProfileInput {
+  full_name?: unknown;
+  email?: unknown;
+  phone?: unknown;
+  country?: unknown;
+  address_line1?: unknown;
+  address_line2?: unknown;
+  city?: unknown;
+  state?: unknown;
+  postal_code?: unknown;
+  tax_id?: unknown;
+}
+
+interface NormalizedProfile {
+  full_name: string;
+  email: string;
+  phone: string | null;
+  country: string;
+  address_line1: string;
+  address_line2: string | null;
+  city: string;
+  state: string;
+  postal_code: string;
+  tax_id: string | null;
+}
+
+function trimStr(v: unknown, max: number): string {
+  if (v === null || v === undefined) return '';
+  return String(v).trim().slice(0, max);
+}
+
+function validateBillingProfile(body: BillingProfileInput): { ok: true; data: NormalizedProfile } | { ok: false; field: string; message: string } {
+  const full_name = trimStr(body.full_name, 120);
+  if (full_name.length < 2) return { ok: false, field: 'full_name', message: 'Full name is required (min 2 chars).' };
+  if (!/^[\p{L}\p{M}\s\.\-'’]+$/u.test(full_name)) return { ok: false, field: 'full_name', message: 'Full name has invalid characters.' };
+
+  const email = trimStr(body.email, 255).toLowerCase();
+  if (!EMAIL_RE.test(email)) return { ok: false, field: 'email', message: 'Enter a valid email address.' };
+
+  const phoneRaw = trimStr(body.phone, 40);
+  let phone: string | null = null;
+  if (phoneRaw) {
+    if (!/^[\+]?[0-9\-\s\(\)]{6,40}$/.test(phoneRaw)) return { ok: false, field: 'phone', message: 'Phone number looks invalid.' };
+    phone = phoneRaw;
+  }
+
+  const country = trimStr(body.country, 2).toUpperCase();
+  if (!SUPPORTED_COUNTRIES.includes(country)) return { ok: false, field: 'country', message: 'Pick a country from the list.' };
+
+  const address_line1 = trimStr(body.address_line1, 255);
+  if (address_line1.length < 3) return { ok: false, field: 'address_line1', message: 'Address line 1 is required.' };
+
+  const address_line2Raw = trimStr(body.address_line2, 255);
+  const address_line2 = address_line2Raw || null;
+
+  const city = trimStr(body.city, 120);
+  if (city.length < 2) return { ok: false, field: 'city', message: 'City is required.' };
+
+  const state = trimStr(body.state, 120);
+  if (state.length < 2) return { ok: false, field: 'state', message: 'State / province is required.' };
+
+  const postal_code = trimStr(body.postal_code, 20);
+  if (postal_code.length < 3) return { ok: false, field: 'postal_code', message: 'Postal / ZIP code is required.' };
+  if (country === 'IN' && !/^[1-9][0-9]{5}$/.test(postal_code)) {
+    return { ok: false, field: 'postal_code', message: 'Indian PIN code must be 6 digits.' };
+  }
+
+  const taxRaw = trimStr(body.tax_id, 64);
+  const tax_id = taxRaw || null;
+
+  return { ok: true, data: {
+    full_name, email, phone, country, address_line1, address_line2, city, state, postal_code, tax_id,
+  } };
+}
+
+async function getBillingProfile(userId: number): Promise<NormalizedProfile | null> {
+  const r = await pool.query(`SELECT * FROM gw_billing_profiles WHERE user_id=$1`, [userId]);
+  return r.rows[0] || null;
+}
+
+router.get('/profile', gwSession, async (req: GwSessionRequest, res: Response) => {
+  const profile = await getBillingProfile(req.gwUser!.id);
+  apiSuccess(res, 'Billing profile loaded', { profile });
+});
+
+router.post('/profile', gwSession, async (req: GwSessionRequest, res: Response) => {
+  const result = validateBillingProfile(req.body || {});
+  if (!result.ok) {
+    return apiError(res, 400, result.message, 'VALIDATION_ERROR', { field: result.field });
+  }
+  const p = result.data;
+  await pool.query(
+    `INSERT INTO gw_billing_profiles
+       (user_id, full_name, email, phone, country,
+        address_line1, address_line2, city, state, postal_code, tax_id, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
+     ON CONFLICT (user_id) DO UPDATE SET
+        full_name=EXCLUDED.full_name,
+        email=EXCLUDED.email,
+        phone=EXCLUDED.phone,
+        country=EXCLUDED.country,
+        address_line1=EXCLUDED.address_line1,
+        address_line2=EXCLUDED.address_line2,
+        city=EXCLUDED.city,
+        state=EXCLUDED.state,
+        postal_code=EXCLUDED.postal_code,
+        tax_id=EXCLUDED.tax_id,
+        updated_at=NOW()`,
+    [
+      req.gwUser!.id, p.full_name, p.email, p.phone, p.country,
+      p.address_line1, p.address_line2, p.city, p.state, p.postal_code, p.tax_id,
+    ],
+  );
+  const profile = await getBillingProfile(req.gwUser!.id);
+  apiSuccess(res, 'Billing profile saved', { profile });
+});
+
+router.all('/profile', methodNotAllowed(['GET','POST']));
+
 function shapeSubscriptionOrder(o: any, includeUpi = false) {
   const isTerminal = ['paid', 'failed', 'expired', 'cancelled'].includes(o.status);
   const out: any = {
@@ -96,9 +222,11 @@ router.get('/me', gwSession, async (req: GwSessionRequest, res: Response) => {
       ORDER BY s.id DESC LIMIT 20`,
     [user.id],
   );
+  const profile = await getBillingProfile(user.id);
   apiSuccess(res, 'Billing summary loaded', {
     is_owner: isOwner(user),
     active_subscription: sub,
+    billing_profile: profile,
     history: history.rows,
     recent_orders: orders.rows,
   });
@@ -130,6 +258,16 @@ router.post('/purchase', gwSession, purchaseLimiter, async (req: GwSessionReques
   const platform = await getPlatformSettings();
   if (!isPlatformConfigured(platform)) {
     return apiError(res, 503, 'Owner has not configured platform UPI yet. Try again later.', 'PLATFORM_PAYMENT_NOT_CONFIGURED');
+  }
+
+  const profile = await getBillingProfile(user.id);
+  if (!profile) {
+    return apiError(
+      res,
+      412,
+      'Add your billing email and address before continuing with checkout.',
+      'BILLING_PROFILE_REQUIRED',
+    );
   }
 
   // Reuse any existing pending order for the same plan in the last hour to

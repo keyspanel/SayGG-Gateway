@@ -194,6 +194,26 @@ CREATE INDEX IF NOT EXISTS idx_gw_sub_orders_user ON gw_subscription_orders(user
 CREATE INDEX IF NOT EXISTS idx_gw_sub_orders_plan ON gw_subscription_orders(plan_id);
 CREATE INDEX IF NOT EXISTS idx_gw_sub_orders_status ON gw_subscription_orders(status);
 CREATE INDEX IF NOT EXISTS idx_gw_sub_orders_expires ON gw_subscription_orders(expires_at);
+
+-- ============================================================
+-- Per-user billing profile (required before purchasing a plan)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS gw_billing_profiles (
+  user_id INTEGER PRIMARY KEY REFERENCES gw_users(id) ON DELETE CASCADE,
+  full_name VARCHAR(120) NOT NULL,
+  email VARCHAR(255) NOT NULL,
+  phone VARCHAR(40),
+  country VARCHAR(2) NOT NULL,
+  address_line1 VARCHAR(255) NOT NULL,
+  address_line2 VARCHAR(255),
+  city VARCHAR(120) NOT NULL,
+  state VARCHAR(120) NOT NULL,
+  postal_code VARCHAR(20) NOT NULL,
+  tax_id VARCHAR(64),
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
 `;
 
 interface PlanSeed {
@@ -210,6 +230,7 @@ interface PlanSeed {
 }
 
 const DEFAULT_PLANS: PlanSeed[] = [
+  // ── Monthly plans ──────────────────────────────────────────
   {
     plan_key: 'server_30',
     name: 'Server API',
@@ -267,25 +288,87 @@ const DEFAULT_PLANS: PlanSeed[] = [
     sort_order: 30,
     is_featured: false,
   },
+  // ── Annual plans (pay 10 months upfront, get 12 = 2 months free, ~17% off) ──
+  {
+    plan_key: 'server_annual',
+    name: 'Server API',
+    method_access: 'server',
+    duration_days: 365,
+    price: 11988,        // 999 × 12
+    discount_price: 7990, // 799 × 10  → 2 months free
+    description: 'Method 1 — direct server-to-server API. Pay yearly and save ~17%.',
+    features: [
+      'Server-to-server API',
+      'Raw UPI payload',
+      'Check order API',
+      'Callback webhook',
+      'Transactions',
+      '2 months free vs monthly',
+    ],
+    sort_order: 11,
+    is_featured: false,
+  },
+  {
+    plan_key: 'hosted_annual',
+    name: 'Hosted Pay Page',
+    method_access: 'hosted',
+    duration_days: 365,
+    price: 17988,         // 1499 × 12
+    discount_price: 11990, // 1199 × 10
+    description: 'Method 2 — branded hosted links with QR and redirects. Pay yearly and save ~17%.',
+    features: [
+      'Hosted payment page',
+      'Payment links',
+      'QR checkout',
+      'Success redirect',
+      'Cancel redirect',
+      'Transactions',
+      '2 months free vs monthly',
+    ],
+    sort_order: 21,
+    is_featured: true,
+  },
+  {
+    plan_key: 'master_annual',
+    name: 'Master Plan',
+    method_access: 'master',
+    duration_days: 365,
+    price: 29988,         // 2499 × 12
+    discount_price: 19990, // 1999 × 10
+    description: 'All access — both methods unlocked together. Best yearly value.',
+    features: [
+      'Server API',
+      'Hosted Pay Page',
+      'Raw UPI payload',
+      'Payment links',
+      'Webhooks',
+      'Redirects',
+      'All features',
+      '2 months free vs monthly',
+    ],
+    sort_order: 31,
+    is_featured: false,
+  },
 ];
 
 async function seedDefaultPlans(): Promise<void> {
-  const r = await pool.query('SELECT COUNT(*)::int AS n FROM gw_plans');
-  if (r.rows[0]?.n > 0) return;
+  let inserted = 0;
   for (const p of DEFAULT_PLANS) {
-    await pool.query(
+    const r = await pool.query(
       `INSERT INTO gw_plans (plan_key, name, method_access, duration_days, price, discount_price,
                              currency, is_active, is_featured, sort_order, description, features, limits)
        VALUES ($1,$2,$3,$4,$5,$6,'INR',TRUE,$7,$8,$9,$10::jsonb,'{}'::jsonb)
-       ON CONFLICT (plan_key) DO NOTHING`,
+       ON CONFLICT (plan_key) DO NOTHING
+       RETURNING id`,
       [
         p.plan_key, p.name, p.method_access, p.duration_days,
         p.price.toFixed(2), p.discount_price.toFixed(2),
         p.is_featured, p.sort_order, p.description, JSON.stringify(p.features),
       ],
     );
+    if (r.rows[0]) inserted++;
   }
-  console.log('[gateway] default plans seeded');
+  if (inserted > 0) console.log(`[gateway] seeded ${inserted} new plan(s)`);
 }
 
 async function ensurePlatformSettingsRow(): Promise<void> {
