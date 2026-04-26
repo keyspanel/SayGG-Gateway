@@ -5,7 +5,7 @@
    stylesheet is also <link>ed in client/index.html with rel="preconnect"
    so the woff2s start downloading on first paint and we avoid any FOUT
    on the success card. */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 /* ============================================
    PayGateway — light-default, dark optional.
@@ -45,8 +45,9 @@
   --gw-radius-sm: 9px;
   --gw-radius-xs: 7px;
 
-  --gw-font: 'Plus Jakarta Sans', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --gw-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+  --gw-font: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --gw-font-display: 'Space Grotesk', 'Inter', system-ui, -apple-system, sans-serif;
+  --gw-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   --gw-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.05);
   --gw-shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.04);
@@ -108,10 +109,33 @@ html, body, #root {
 body {
   font-family: var(--gw-font);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  font-feature-settings: "cv11", "ss01", "ss03", "cv02", "cv03", "cv04";
+  font-variant-ligatures: contextual common-ligatures;
+  letter-spacing: -0.011em;
   line-height: 1.5;
   font-size: 14.5px;
   overscroll-behavior-y: none;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--gw-font-display);
+  font-feature-settings: "ss01", "ss02", "ss05";
+  letter-spacing: -0.025em;
+}
+h1 { letter-spacing: -0.035em; }
+h2 { letter-spacing: -0.030em; }
+
+code, kbd, pre, samp, .mono {
+  font-family: var(--gw-mono);
+  font-feature-settings: "calt", "liga", "zero", "ss01";
+  font-variant-ligatures: contextual;
+}
+
+button, input, select, textarea {
+  font-family: var(--gw-font);
+  font-feature-settings: "cv11", "ss01", "cv02", "cv03";
 }
 
 a { color: var(--gw-primary); text-decoration: none; }
