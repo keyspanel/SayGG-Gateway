@@ -398,94 +398,95 @@ export default function BillingCheckoutDetails() {
               <span>Country</span>
               <input value="India" disabled readOnly />
             </label>
-            <label className={errField === 'state' ? 'err' : ''}>
-              <span>State *</span>
-              <StateInput
-                value={form.state}
-                onChange={(v) => {
-                  // Switching state must clear any previously-typed city,
-                  // otherwise the user could end up with a "Mumbai" from
-                  // Maharashtra still showing while Kerala is selected.
-                  setForm((f) => ({
-                    ...f,
-                    state: v,
-                    city: canonicalizeCity(f.city, canonicalizeState(v)),
-                  }));
-                }}
-              />
-            </label>
-            <div className="gw-form-row">
-              <label className={errField === 'city' ? 'err' : ''}>
-                <span>City *</span>
-                <CityInput
-                  value={form.city}
-                  onChange={(v) => set('city', v)}
-                  state={canonicalizeState(form.state)}
-                />
-              </label>
-              <label className={errField === 'postal_code' ? 'err' : ''}>
-                <span>Postal / ZIP *</span>
-                <input
-                  value={form.postal_code}
-                  onChange={(e) => {
-                    // Only digits, max 6 — also strips spaces from a pasted PIN.
-                    const next = e.target.value.replace(/\D+/g, '').slice(0, 6);
-                    set('postal_code', next);
-                  }}
-                  placeholder="6-digit PIN"
-                  maxLength={6}
-                  inputMode="numeric"
-                  pattern="[1-9][0-9]{5}"
-                  autoComplete="postal-code"
-                  required
-                />
-              </label>
-            </div>
+            <div className="gw-address-block">
+              <div className="gw-address-head">
+                <span className="gw-address-title">Address</span>
+                <span className="gw-address-sub">Type your PIN — we'll fill state &amp; city for you.</span>
+              </div>
 
-            {pinStatus.kind === 'loading' && (
-              <div className="gw-pin-status loading" role="status" aria-live="polite">
-                <span className="gw-pin-spin" aria-hidden="true" />
-                <span>Looking up PIN {form.postal_code}…</span>
-              </div>
-            )}
-            {pinStatus.kind === 'ok' && (
-              <div className="gw-pin-status ok" role="status" aria-live="polite">
-                <svg className="gw-pin-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M20 6 9 17l-5-5" />
-                </svg>
-                <span>
-                  Auto-filled from PIN <b>{form.postal_code}</b> • {pinStatus.state} • {pinStatus.chosen}
-                </span>
-                {pinStatus.districts.length > 1 && (
-                  <span className="gw-pin-alts">
-                    <span className="gw-pin-alts-lbl">Other matches:</span>
-                    {pinStatus.districts
-                      .filter((d) => d.toLowerCase() !== pinStatus.chosen.toLowerCase())
-                      .slice(0, 3)
-                      .map((d) => (
-                        <button
-                          key={d}
-                          type="button"
-                          className="gw-pin-chip"
-                          onClick={() => choosePinDistrict(d)}
-                        >
-                          {d}
-                        </button>
-                      ))}
+              <label className={`gw-address-pin${errField === 'postal_code' ? ' err' : ''}`}>
+                <span>PIN code *</span>
+                <div className={`gw-pin-input${pinStatus.kind === 'ok' ? ' ok' : ''}${pinStatus.kind === 'loading' ? ' loading' : ''}${pinStatus.kind === 'notfound' || pinStatus.kind === 'error' ? ' warn' : ''}`}>
+                  <input
+                    value={form.postal_code}
+                    onChange={(e) => {
+                      const next = e.target.value.replace(/\D+/g, '').slice(0, 6);
+                      set('postal_code', next);
+                    }}
+                    placeholder="6-digit PIN code"
+                    maxLength={6}
+                    inputMode="numeric"
+                    pattern="[1-9][0-9]{5}"
+                    autoComplete="postal-code"
+                    aria-describedby="gw-pin-help"
+                    required
+                  />
+                  <span className="gw-pin-input-end" aria-hidden="true">
+                    {pinStatus.kind === 'loading' && <span className="gw-pin-spin" />}
+                    {pinStatus.kind === 'ok' && (
+                      <svg className="gw-pin-input-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
+                    )}
+                    {(pinStatus.kind === 'notfound' || pinStatus.kind === 'error') && (
+                      <svg className="gw-pin-input-warn" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="M12 8v4" />
+                        <path d="M12 16h.01" />
+                      </svg>
+                    )}
                   </span>
-                )}
+                </div>
+                <span id="gw-pin-help" className="gw-pin-help">
+                  {pinStatus.kind === 'notfound' && 'No postal records for this PIN — pick state and city manually.'}
+                  {pinStatus.kind === 'error' && 'PIN lookup unavailable — pick state and city manually.'}
+                  {pinStatus.kind !== 'notfound' && pinStatus.kind !== 'error' && 'Enter a valid 6-digit Indian PIN code.'}
+                </span>
+              </label>
+
+              <div className="gw-form-row">
+                <label className={errField === 'state' ? 'err' : ''}>
+                  <span>State *</span>
+                  <StateInput
+                    value={form.state}
+                    onChange={(v) => {
+                      setForm((f) => ({
+                        ...f,
+                        state: v,
+                        city: canonicalizeCity(f.city, canonicalizeState(v)),
+                      }));
+                    }}
+                  />
+                </label>
+                <label className={errField === 'city' ? 'err' : ''}>
+                  <span>City *</span>
+                  <CityInput
+                    value={form.city}
+                    onChange={(v) => set('city', v)}
+                    state={canonicalizeState(form.state)}
+                  />
+                </label>
               </div>
-            )}
-            {pinStatus.kind === 'notfound' && (
-              <div className="gw-pin-status warn" role="status" aria-live="polite">
-                No postal records for this PIN — please pick state and city manually.
-              </div>
-            )}
-            {pinStatus.kind === 'error' && (
-              <div className="gw-pin-status warn" role="status" aria-live="polite">
-                PIN lookup is unavailable — please pick state and city manually.
-              </div>
-            )}
+
+              {pinStatus.kind === 'ok' && pinStatus.districts.length > 1 && (
+                <div className="gw-pin-alts-row" role="group" aria-label="Other districts for this PIN">
+                  <span className="gw-pin-alts-lbl">Other districts for this PIN:</span>
+                  {pinStatus.districts
+                    .filter((d) => d.toLowerCase() !== pinStatus.chosen.toLowerCase())
+                    .slice(0, 3)
+                    .map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        className="gw-pin-chip"
+                        onClick={() => choosePinDistrict(d)}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
 
           <div className="gw-checkout-actions">
             <Link to="/gateway/billing" className="gw-btn-ghost">Cancel</Link>
