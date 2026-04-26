@@ -108,7 +108,11 @@ export default function BillingCheckoutDetails() {
 
   const [form, setForm] = useState<CheckoutFormState>({
     email: incoming?.form?.email || '',
-    phone: incoming?.form?.phone || '',
+    // Always store the phone as 10 raw digits; the +91 prefix is only a
+    // visual chip next to the input. Storing a formatted "+91 1234567890"
+    // here used to leak the "91" back into the user-typed value on the
+    // next render and turn "9" into "919".
+    phone: extractPhoneDigits(incoming?.form?.phone || ''),
     full_name: incoming?.form?.full_name || '',
     state: incoming?.form?.state || '',
     city: incoming?.form?.city || '',
@@ -116,6 +120,9 @@ export default function BillingCheckoutDetails() {
   });
   const [err, setErr] = useState('');
   const [errField, setErrField] = useState('');
+  // Bumped every time a submit fails validation; the shake/scroll effect
+  // listens to this so it re-fires even when the same field fails twice.
+  const [shakeKey, setShakeKey] = useState(0);
 
   // Last successful India Post lookup. Lets the form accept a non-canonical
   // district (e.g. "Hailakandi") if it matches the PIN the user typed.
@@ -174,7 +181,7 @@ export default function BillingCheckoutDetails() {
         }
         const prefilled: CheckoutFormState = {
           email: profile?.email || user?.email || '',
-          phone: profile?.phone || '',
+          phone: extractPhoneDigits(profile?.phone || ''),
           full_name: profile?.full_name || '',
           state: canonState,
           city: useCity,
@@ -289,7 +296,12 @@ export default function BillingCheckoutDetails() {
     e.preventDefault();
     setErr(''); setErrField('');
     const v = validate();
-    if (!v.ok) { setErr(v.message || 'Please check the form.'); setErrField(v.field || ''); return; }
+    if (!v.ok) {
+      setErr(v.message || 'Please check the form.');
+      setErrField(v.field || '');
+      setShakeKey((k) => k + 1);
+      return;
+    }
     if (!plan) return;
 
     const canonState = canonicalizeState(form.state);
@@ -311,6 +323,26 @@ export default function BillingCheckoutDetails() {
       state: { form: cleaned, fee, plan },
     });
   };
+
+  // Auto-scroll to the first invalid field and shake it briefly so the user
+  // is taken straight to what needs fixing. Bumping `shakeKey` re-triggers
+  // the effect even when the same field fails validation twice in a row.
+  useEffect(() => {
+    if (shakeKey === 0) return;
+    const card = document.querySelector('.gw-checkout-form-card');
+    if (!card) return;
+    const target = card.querySelector('label.err, .gw-address-pin.err') as HTMLElement | null;
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Shake the most prominent box inside the label so the animation is
+    // tight around the actual input rather than the whole row + label text.
+    const box = (target.querySelector('.gw-pin-input, .gw-phone-input, .gw-city-field, input') as HTMLElement | null) || target;
+    box.classList.add('gw-shake');
+    const focusEl = target.querySelector('input') as HTMLInputElement | null;
+    const ft = setTimeout(() => focusEl?.focus({ preventScroll: true }), 320);
+    const ct = setTimeout(() => box.classList.remove('gw-shake'), 600);
+    return () => { clearTimeout(ft); clearTimeout(ct); };
+  }, [shakeKey]);
 
   if (loading) return <div className="gw-loading">Loading…</div>;
 
@@ -364,16 +396,23 @@ export default function BillingCheckoutDetails() {
               <div className="gw-phone-input">
                 <span className="gw-phone-prefix" aria-hidden="true">+91</span>
                 <input
-                  value={extractPhoneDigits(form.phone)}
+                  value={form.phone}
                   onChange={(e) => {
-                    const digits = extractPhoneDigits(e.target.value);
-                    set('phone', formatINPhone(digits));
+                    // Keep ONLY digits the user actually typed in the box
+                    // (max 10). Do not run extractPhoneDigits here — that
+                    // would strip a leading "91" the user is genuinely
+                    // typing, e.g. for a number like 9123456789.
+                    const next = e.target.value.replace(/\D+/g, '').slice(0, 10);
+                    set('phone', next);
                   }}
                   onPaste={(e) => {
+                    // Pasting is the one place we DO strip a country code,
+                    // because users often paste "+91 9123456789" or
+                    // "919123456789" copied from another app.
                     e.preventDefault();
                     const text = e.clipboardData.getData('text');
                     const digits = extractPhoneDigits(text);
-                    set('phone', formatINPhone(digits));
+                    set('phone', digits);
                   }}
                   placeholder="98xxxxxxxx"
                   maxLength={10}
@@ -810,6 +849,9 @@ function GeoAutocomplete({
 
   return (
     <div className={`gw-city-wrap${showList ? ' open' : ''}${disabled ? ' is-disabled' : ''}`} ref={wrapRef}>
+      {disabled && emptyLabel && (
+        <p className="gw-city-hint">{emptyLabel}</p>
+      )}
       <div className="gw-city-field">
         <span className="gw-city-icon" aria-hidden="true">{HeaderIcon}</span>
         <input
@@ -857,9 +899,6 @@ function GeoAutocomplete({
             </li>
           ))}
         </ul>
-      )}
-      {disabled && (
-        <p className="gw-city-hint">{emptyLabel}</p>
       )}
     </div>
   );
