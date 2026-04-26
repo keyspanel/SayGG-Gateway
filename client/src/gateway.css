@@ -2869,7 +2869,9 @@ code {
   padding: 0 12px;
   font-size: 14px; font-weight: 700;
   color: var(--gw-text-soft);
-  background: var(--gw-surface-hover);
+  /* Match the input area background so the +91 chip and the number area
+     read as a single unified field instead of a two-tone control. */
+  background: transparent;
   border-right: 1px solid var(--gw-border);
   user-select: none;
   letter-spacing: 0.01em;
@@ -2887,6 +2889,31 @@ code {
   border: none;
   box-shadow: none;
   background: transparent;
+}
+
+/* "Settled" look for fields the user has filled correctly: same calm,
+   muted appearance as the locked Gmail field, so the eye reads "this is
+   done". Only kicks in when the field is non-empty, valid, and not in
+   focus — typing or correcting brings the bright text color back. */
+.gw-billing-form input:not(:placeholder-shown):valid:not(:focus) {
+  color: var(--gw-text-soft);
+  background: var(--gw-surface-2);
+}
+.gw-billing-form .gw-phone-input:focus-within { /* keep focus state crisp */ }
+.gw-billing-form .gw-phone-input:has(input:not(:placeholder-shown):valid):not(:focus-within) input {
+  color: var(--gw-text-soft);
+}
+.gw-billing-form .gw-phone-input:has(input:not(:placeholder-shown):valid):not(:focus-within) .gw-phone-prefix {
+  color: var(--gw-text-faint);
+}
+.gw-billing-form .gw-city-field:has(input:not(:placeholder-shown):valid):not(:focus-within) input {
+  color: var(--gw-text-soft);
+}
+.gw-billing-form .gw-city-field:has(input:not(:placeholder-shown):valid):not(:focus-within) .gw-city-icon {
+  color: var(--gw-text-faint);
+}
+.gw-billing-form .gw-pin-input:has(input:not(:placeholder-shown):valid):not(:focus-within) input {
+  color: var(--gw-text-soft);
 }
 
 /* City input with an autocomplete dropdown of curated Indian cities. */

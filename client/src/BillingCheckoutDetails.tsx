@@ -417,6 +417,7 @@ export default function BillingCheckoutDetails() {
                   placeholder="98xxxxxxxx"
                   maxLength={10}
                   inputMode="numeric"
+                  pattern="[0-9]{10}"
                   autoComplete="tel-national"
                   aria-label="Mobile number, 10 digits, India"
                   required
