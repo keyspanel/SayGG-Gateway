@@ -260,35 +260,168 @@ export default function BillingCheckoutDetails() {
 }
 
 /**
- * Compact one-line order summary used at the top of both checkout steps.
- * Replaces the old sticky sidebar — same numbers, a fraction of the space.
- * Wraps gracefully to two lines on narrow screens.
+ * Premium order-summary card shown at the top of both checkout steps.
+ * Renders the plan identity, included features (when available), an
+ * itemised price breakdown, and a prominent total — all wrapped in a
+ * single polished card so the user always sees what they're paying for.
+ *
+ * The Confirm page passes a slimmer plan object (no description/features),
+ * so those fields are optional and degrade gracefully.
  */
 export function CheckoutSummaryMini({
   plan, planPrice, fee, total,
 }: {
-  plan: { name: string; method_access: string; duration_days: number };
+  plan: {
+    name: string;
+    method_access: string;
+    duration_days: number;
+    price?: number;
+    discount_price?: number | null;
+    is_featured?: boolean;
+    description?: string | null;
+    features?: string[];
+  };
   planPrice: number;
   fee: number;
   total: number;
 }) {
   const duration = plan.duration_days >= 200 ? '1 year' : `${plan.duration_days} days`;
+  const list = (plan.features || []).filter(Boolean).slice(0, 4);
+  const hasDiscount =
+    typeof plan.price === 'number' &&
+    typeof plan.discount_price === 'number' &&
+    plan.discount_price !== null &&
+    plan.discount_price < plan.price;
+  const savings = hasDiscount ? Math.max(0, (plan.price as number) - (plan.discount_price as number)) : 0;
+  const savingsPct = hasDiscount && (plan.price as number) > 0
+    ? Math.round((savings / (plan.price as number)) * 100)
+    : 0;
+
   return (
-    <div className="gw-card gw-checkout-mini" role="region" aria-label="Order summary">
-      <div className="gw-checkout-mini-plan">
-        <b className="gw-checkout-mini-name">{plan.name}</b>
-        <span className="gw-checkout-mini-meta">{labelMethod(plan.method_access)} · {duration}</span>
+    <section className="gw-card gw-checkout-mini" role="region" aria-label="Order summary">
+      <header className="gw-co-mini-head">
+        <div className="gw-co-mini-eyebrow">
+          <span className="gw-co-mini-eyebrow-dot" aria-hidden="true" />
+          Order summary
+        </div>
+        {plan.is_featured && (
+          <span className="gw-co-mini-badge" title="Featured plan">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 2.5l2.6 6.3 6.8.55-5.18 4.43 1.6 6.62L12 16.9l-5.82 3.5 1.6-6.62L2.6 9.35l6.8-.55L12 2.5z" />
+            </svg>
+            Featured
+          </span>
+        )}
+      </header>
+
+      <div className="gw-co-mini-plan">
+        <div className="gw-co-mini-plan-icon" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z" />
+            <path d="M9 12l2 2 4-4" />
+          </svg>
+        </div>
+        <div className="gw-co-mini-plan-text">
+          <h3 className="gw-co-mini-name">{plan.name}</h3>
+          {plan.description && (
+            <p className="gw-co-mini-desc">{plan.description}</p>
+          )}
+          <div className="gw-co-mini-tags">
+            <span className="gw-co-mini-tag">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <path d="M3 10h18" />
+              </svg>
+              {labelMethod(plan.method_access)}
+            </span>
+            <span className="gw-co-mini-tag">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+              {duration} access
+            </span>
+          </div>
+        </div>
       </div>
-      <div className="gw-checkout-mini-lines" aria-hidden="true">
-        <span>Plan ₹{planPrice.toFixed(2)}</span>
-        <span className="gw-checkout-mini-dot">+</span>
-        <span>Fee ₹{(fee || 0).toFixed(2)}</span>
+
+      {list.length > 0 && (
+        <ul className="gw-co-mini-feats" aria-label="What's included">
+          {list.map((f) => (
+            <li key={f}>
+              <svg className="gw-co-mini-feats-tick" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M5 12l5 5L20 7" />
+              </svg>
+              <span>{f}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="gw-co-mini-rule" aria-hidden="true" />
+
+      <dl className="gw-co-mini-rows">
+        <div className="gw-co-mini-row">
+          <dt>Plan price</dt>
+          <dd>
+            {hasDiscount && (
+              <s className="gw-co-mini-strike">₹{(plan.price as number).toFixed(2)}</s>
+            )}
+            <span>₹{planPrice.toFixed(2)}</span>
+          </dd>
+        </div>
+        {hasDiscount && (
+          <div className="gw-co-mini-row gw-co-mini-row-save">
+            <dt>
+              You save
+              {savingsPct > 0 && <span className="gw-co-mini-save-pct">{savingsPct}% off</span>}
+            </dt>
+            <dd>−₹{savings.toFixed(2)}</dd>
+          </div>
+        )}
+        <div className="gw-co-mini-row">
+          <dt>Platform fee</dt>
+          <dd>{fee > 0 ? `₹${fee.toFixed(2)}` : <span className="gw-co-mini-free">Included</span>}</dd>
+        </div>
+      </dl>
+
+      <div className="gw-co-mini-total">
+        <div className="gw-co-mini-total-l">
+          <span className="gw-co-mini-total-lbl">Total due today</span>
+          <span className="gw-co-mini-total-sub">One-time payment · INR</span>
+        </div>
+        <div className="gw-co-mini-total-r">
+          <span className="gw-co-mini-total-cur">₹</span>
+          <span className="gw-co-mini-total-amt">{total.toFixed(2)}</span>
+        </div>
       </div>
-      <div className="gw-checkout-mini-total">
-        <span className="gw-checkout-mini-total-lbl">Total</span>
-        <b className="gw-checkout-mini-total-amt">₹{total.toFixed(2)}</b>
-      </div>
-    </div>
+
+      <footer className="gw-co-mini-foot">
+        <span className="gw-co-mini-trust">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="4" y="11" width="16" height="10" rx="2" />
+            <path d="M8 11V8a4 4 0 018 0v3" />
+          </svg>
+          Secure SSL checkout
+        </span>
+        <span className="gw-co-mini-trust-sep" aria-hidden="true">·</span>
+        <span className="gw-co-mini-trust">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z" />
+          </svg>
+          Encrypted payment
+        </span>
+        <span className="gw-co-mini-trust-sep" aria-hidden="true">·</span>
+        <span className="gw-co-mini-trust">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M21 8v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8" />
+            <path d="M3 8l9 6 9-6" />
+            <path d="M3 8a2 2 0 012-2h14a2 2 0 012 2" />
+          </svg>
+          Receipt emailed
+        </span>
+      </footer>
+    </section>
   );
 }
 

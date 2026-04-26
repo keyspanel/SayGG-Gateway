@@ -18,3 +18,4 @@ Standalone Payment Gateway website with an Express API, React/Vite frontend, and
 - Frontend API helper unwraps standardized `{ success, message, data }` responses for app screens.
 - Gateway API responses use `{ success: true, message, data }` for success and `{ success: false, message, code, details }` for errors.
 - Gateway namespace has explicit JSON 404, 405, and global API error handling to avoid raw Express text/HTML responses.
+- Billing checkout pages (`BillingCheckoutDetails.tsx`, `BillingCheckoutConfirm.tsx`) share a single premium `CheckoutSummaryMini` card. The component accepts an extended plan shape (description, features, is_featured, price, discount_price are optional) and renders an itemised price breakdown, savings percentage, included features, total-due block, and trust footer; styles live under `.gw-checkout-mini` / `.gw-co-mini-*` in `client/src/gateway.css` and stay responsive at the 540px breakpoint.
