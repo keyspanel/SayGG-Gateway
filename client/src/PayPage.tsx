@@ -1052,7 +1052,7 @@ export default function PayPage({ basePath = '/api/pay', pagePath = '/pay' }: Pa
     cardBlobRef.current = null; // new order ⇒ stale card
     qrImgRef.current = null;
     qrFetchPromiseRef.current = (async () => {
-      const res = await fetch(`${basePath}/${tk}/qr.png?size=2048`);
+      const res = await fetch(`${basePath}/${tk}/qr.png?size=4096`);
       if (!res.ok) throw new Error(`QR fetch HTTP ${res.status}`);
       const blob = await res.blob();
       const objUrl = URL.createObjectURL(blob);
@@ -1134,7 +1134,7 @@ export default function PayPage({ basePath = '/api/pay', pagePath = '/pay' }: Pa
       if (qrFetchPromiseRef.current) {
         qrImg = await qrFetchPromiseRef.current;
       } else {
-        const res = await fetch(`${basePath}/${order.public_token}/qr.png?size=2048`);
+        const res = await fetch(`${basePath}/${order.public_token}/qr.png?size=4096`);
         const blob = await res.blob();
         const objUrl = URL.createObjectURL(blob);
         qrImg = await new Promise<HTMLImageElement>((resolve, reject) => {
