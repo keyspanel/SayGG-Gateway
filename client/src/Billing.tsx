@@ -18,106 +18,38 @@ interface Plan {
   features: string[];
 }
 
-interface BillingProfile {
-  full_name: string;
-  email: string;
-  phone: string | null;
-  country: string;
-  address_line1: string;
-  address_line2: string | null;
-  city: string;
-  state: string;
-  postal_code: string;
-  tax_id: string | null;
-}
-
 type BillingPeriod = 'monthly' | 'yearly';
-
-const COUNTRIES: { code: string; name: string }[] = [
-  { code: 'IN', name: 'India' },
-  { code: 'US', name: 'United States' },
-  { code: 'GB', name: 'United Kingdom' },
-  { code: 'AE', name: 'United Arab Emirates' },
-  { code: 'SG', name: 'Singapore' },
-  { code: 'CA', name: 'Canada' },
-  { code: 'AU', name: 'Australia' },
-  { code: 'DE', name: 'Germany' },
-  { code: 'FR', name: 'France' },
-  { code: 'NL', name: 'Netherlands' },
-  { code: 'JP', name: 'Japan' },
-  { code: 'OT', name: 'Other' },
-];
 
 export default function Billing() {
   const { user } = useGwAuth();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [me, setMe] = useState<any>(null);
-  const [profile, setProfile] = useState<BillingProfile | null>(null);
+  const [platformFee, setPlatformFee] = useState<number>(0);
   const [period, setPeriod] = useState<BillingPeriod>('monthly');
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState<number | null>(null);
 
-  // billing-details modal state
-  const [showProfile, setShowProfile] = useState(false);
-  const [pendingPlanId, setPendingPlanId] = useState<number | null>(null);
+  // Two-step checkout sheet
+  const [sheetPlan, setSheetPlan] = useState<Plan | null>(null);
 
   const load = async () => {
     setLoading(true); setErr('');
     try {
       const [p, m] = await Promise.all([apiGet('/api/billing/plans'), apiGet('/api/billing/me')]);
       setPlans(p.items || []);
+      setPlatformFee(typeof p.platform_fee === 'number' ? p.platform_fee : (typeof m.platform_fee === 'number' ? m.platform_fee : 0));
       setMe(m);
-      setProfile(m.billing_profile || null);
     } catch (e: any) {
       setErr(e.message);
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
 
-  const buy = async (planId: number) => {
-    setBusy(planId); setErr('');
-    try {
-      const order = await apiPost('/api/billing/purchase', { plan_id: planId });
-      window.location.href = `/billing/pay/${order.public_token}`;
-    } catch (e: any) {
-      const code = e instanceof ApiError ? e.code : '';
-      if (code === 'BILLING_PROFILE_REQUIRED') {
-        setPendingPlanId(planId);
-        setShowProfile(true);
-      } else if (code === 'PLATFORM_PAYMENT_NOT_CONFIGURED') {
-        setErr('Plan checkout is temporarily unavailable. Please try again shortly.');
-      } else {
-        setErr(e.message);
-      }
-      setBusy(null);
-    }
-  };
-
-  const onChoose = (planId: number) => {
-    if (!profile) {
-      setPendingPlanId(planId);
-      setShowProfile(true);
-      return;
-    }
-    buy(planId);
-  };
-
-  const onProfileSaved = (p: BillingProfile) => {
-    setProfile(p);
-    setShowProfile(false);
-    if (pendingPlanId != null) {
-      const id = pendingPlanId;
-      setPendingPlanId(null);
-      buy(id);
-    }
-  };
-
   const visiblePlans = useMemo(() => {
     return plans.filter((p) => period === 'yearly' ? p.duration_days >= 200 : p.duration_days < 200);
   }, [plans, period]);
 
-  // Pair monthly ↔ annual by method_access for showing savings on annual cards.
   const monthlyByMethod = useMemo(() => {
     const map: Record<string, Plan> = {};
     plans.filter((p) => p.duration_days < 200).forEach((p) => { map[p.method_access] = p; });
@@ -128,6 +60,31 @@ export default function Billing() {
 
   const sub = me?.active_subscription;
   const hasYearly = plans.some((p) => p.duration_days >= 200);
+  const initialProfile = me?.billing_profile || null;
+
+  const onChoose = (plan: Plan) => {
+    setErr('');
+    setSheetPlan(plan);
+  };
+
+  const onSheetCompleted = async (planId: number) => {
+    setBusy(planId);
+    try {
+      const order = await apiPost('/api/billing/purchase', { plan_id: planId });
+      window.location.href = `/billing/pay/${order.public_token}`;
+    } catch (e: any) {
+      const code = e instanceof ApiError ? e.code : '';
+      if (code === 'PLATFORM_PAYMENT_NOT_CONFIGURED') {
+        setErr('Plan checkout is temporarily unavailable. Please try again shortly.');
+      } else if (code === 'BILLING_PROFILE_REQUIRED') {
+        setErr('Please complete the billing form before continuing.');
+      } else {
+        setErr(e.message);
+      }
+      setSheetPlan(null);
+      setBusy(null);
+    }
+  };
 
   return (
     <div className="gw-page">
@@ -136,11 +93,6 @@ export default function Billing() {
           <h2>Billing</h2>
           <p>Choose a plan to unlock the gateway.</p>
         </div>
-        {!user?.is_owner && (
-          <button className="gw-btn-ghost sm" onClick={() => setShowProfile(true)}>
-            {profile ? 'Edit billing details' : 'Add billing details'}
-          </button>
-        )}
       </div>
 
       {err && <div className="gw-alert error"><span>{err}</span></div>}
@@ -151,7 +103,7 @@ export default function Billing() {
         </div>
       )}
 
-      {sub ? (
+      {sub && (
         <div className="gw-card feature">
           <div className="gw-card-h">
             <h3>Current plan</h3>
@@ -171,26 +123,6 @@ export default function Billing() {
               )}
             </div>
           </div>
-        </div>
-      ) : !user?.is_owner ? (
-        <div className="gw-alert warn">
-          <span>You don't have an active plan yet. Pick one below to start using the gateway.</span>
-        </div>
-      ) : null}
-
-      {!user?.is_owner && (
-        <div className="gw-billing-meta">
-          {profile ? (
-            <div className="gw-billing-meta-row">
-              <span className="gw-muted">Billing to</span>
-              <span><b>{profile.full_name}</b> · {profile.email} · {profile.city}, {profile.country}</span>
-            </div>
-          ) : (
-            <div className="gw-billing-meta-row warn">
-              <span>Billing email and address are required before checkout.</span>
-              <button className="gw-btn-ghost xs" onClick={() => setShowProfile(true)}>Add now</button>
-            </div>
-          )}
         </div>
       )}
 
@@ -268,7 +200,7 @@ export default function Billing() {
                 <button
                   className={featured ? 'gw-btn-primary gw-btn-block' : 'gw-btn-ghost gw-btn-block'}
                   disabled={busy === p.id}
-                  onClick={() => onChoose(p.id)}
+                  onClick={() => onChoose(p)}
                 >
                   {busy === p.id ? 'Starting…' : sub ? 'Switch / renew' : 'Choose plan'}
                 </button>
@@ -305,174 +237,223 @@ export default function Billing() {
         </div>
       )}
 
-      {showProfile && (
-        <BillingProfileModal
-          initial={profile}
+      {sheetPlan && (
+        <CheckoutSheet
+          plan={sheetPlan}
+          fee={platformFee}
+          initialProfile={initialProfile}
           defaultEmail={user?.email || ''}
-          onClose={() => { setShowProfile(false); setPendingPlanId(null); }}
-          onSaved={onProfileSaved}
+          onClose={() => setSheetPlan(null)}
+          onConfirmed={() => onSheetCompleted(sheetPlan.id)}
         />
       )}
     </div>
   );
 }
 
-interface ModalProps {
-  initial: BillingProfile | null;
+/* ----------------------------- Two-step sheet ----------------------------- */
+
+interface SheetProps {
+  plan: Plan;
+  fee: number;
+  initialProfile: any;
   defaultEmail: string;
   onClose: () => void;
-  onSaved: (p: BillingProfile) => void;
+  onConfirmed: () => void;
 }
 
-function BillingProfileModal({ initial, defaultEmail, onClose, onSaved }: ModalProps) {
-  const [form, setForm] = useState({
-    full_name: initial?.full_name || '',
-    email: initial?.email || defaultEmail || '',
-    phone: initial?.phone || '',
-    country: initial?.country || 'IN',
-    address_line1: initial?.address_line1 || '',
-    address_line2: initial?.address_line2 || '',
-    city: initial?.city || '',
-    state: initial?.state || '',
-    postal_code: initial?.postal_code || '',
-    tax_id: initial?.tax_id || '',
+interface FormState {
+  email: string;
+  phone: string;
+  full_name: string;
+  city: string;
+  postal_code: string;
+}
+
+function CheckoutSheet({ plan, fee, initialProfile, defaultEmail, onClose, onConfirmed }: SheetProps) {
+  const [step, setStep] = useState<'form' | 'confirm'>('form');
+  const [form, setForm] = useState<FormState>({
+    email: initialProfile?.email || defaultEmail || '',
+    phone: initialProfile?.phone || '',
+    full_name: initialProfile?.full_name || '',
+    city: initialProfile?.city || '',
+    postal_code: initialProfile?.postal_code || '',
   });
-  const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const [errField, setErrField] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k: keyof FormState, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  const submit = async (e: React.FormEvent) => {
+  const planPrice = plan.discount_price ?? plan.price;
+  const total = Math.round((planPrice + (fee || 0)) * 100) / 100;
+
+  const validateLocal = (): { ok: boolean; field?: string; message?: string } => {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email.trim())) return { ok: false, field: 'email', message: 'Enter a valid email address.' };
+    if (!/^[\+]?[0-9\-\s\(\)]{6,40}$/.test(form.phone.trim())) return { ok: false, field: 'phone', message: 'Mobile number looks invalid.' };
+    if (form.full_name.trim().length < 2) return { ok: false, field: 'full_name', message: 'Name is required.' };
+    if (form.city.trim().length < 2) return { ok: false, field: 'city', message: 'City is required.' };
+    if (!/^[1-9][0-9]{5}$/.test(form.postal_code.trim())) return { ok: false, field: 'postal_code', message: 'Indian PIN code must be 6 digits.' };
+    return { ok: true };
+  };
+
+  const goToConfirm = (e: React.FormEvent) => {
     e.preventDefault();
+    setErr(''); setErrField('');
+    const v = validateLocal();
+    if (!v.ok) { setErr(v.message || 'Please check the form.'); setErrField(v.field || ''); return; }
+    setStep('confirm');
+  };
+
+  const confirm = async () => {
     setSaving(true); setErr(''); setErrField('');
     try {
-      const r = await apiPost('/api/billing/profile', form);
-      onSaved(r.profile);
+      await apiPost('/api/billing/profile', {
+        full_name: form.full_name.trim(),
+        email: form.email.trim().toLowerCase(),
+        phone: form.phone.trim(),
+        country: 'IN',
+        city: form.city.trim(),
+        postal_code: form.postal_code.trim(),
+      });
+      onConfirmed();
     } catch (e: any) {
       setErr(e.message);
       if (e instanceof ApiError && e.details && (e.details as any).field) {
         setErrField((e.details as any).field);
       }
+      setStep('form');
       setSaving(false);
     }
   };
 
   return (
-    <div className="gw-modal-overlay" onClick={onClose}>
-      <div className="gw-modal-card" onClick={(e) => e.stopPropagation()} role="dialog" aria-labelledby="bp-h">
-        <div className="gw-modal-h">
+    <div className="gw-modal-overlay" onClick={() => !saving && onClose()}>
+      <div className="gw-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-labelledby="cs-h">
+        <div className="gw-sheet-handle" aria-hidden="true" />
+        <div className="gw-sheet-h">
           <div>
-            <h3 id="bp-h">Billing details</h3>
-            <p className="gw-muted">Required before checkout. Used on your invoices and receipts.</p>
+            <h3 id="cs-h">{step === 'form' ? 'Your details' : 'Confirm purchase'}</h3>
+            <p className="gw-muted">
+              {step === 'form'
+                ? 'Required for invoicing. Stored against your account.'
+                : 'Review your details and the plan amount before paying.'}
+            </p>
           </div>
-          <button className="gw-btn-ghost xs" onClick={onClose} aria-label="Close">✕</button>
+          <button className="gw-btn-ghost xs" onClick={onClose} aria-label="Close" disabled={saving}>✕</button>
         </div>
 
-        <form className="gw-billing-form" onSubmit={submit} noValidate>
-          {err && <div className="gw-alert error"><span>{err}</span></div>}
+        {err && <div className="gw-alert error"><span>{err}</span></div>}
 
-          <div className="gw-form-row">
-            <label className={errField === 'full_name' ? 'err' : ''}>
-              <span>Full name *</span>
-              <input
-                value={form.full_name}
-                onChange={(e) => set('full_name', e.target.value)}
-                placeholder="Jane Doe"
-                maxLength={120}
-                required
-              />
-            </label>
+        {step === 'form' ? (
+          <form className="gw-billing-form" onSubmit={goToConfirm} noValidate>
             <label className={errField === 'email' ? 'err' : ''}>
-              <span>Billing email *</span>
+              <span>Gmail / Email *</span>
               <input
                 type="email"
                 value={form.email}
                 onChange={(e) => set('email', e.target.value)}
-                placeholder="you@example.com"
+                placeholder="you@gmail.com"
                 maxLength={255}
+                autoFocus
                 required
               />
             </label>
-          </div>
-
-          <div className="gw-form-row">
             <label className={errField === 'phone' ? 'err' : ''}>
-              <span>Phone</span>
+              <span>Mobile number *</span>
               <input
                 value={form.phone}
                 onChange={(e) => set('phone', e.target.value)}
                 placeholder="+91 98xxxxxxxx"
                 maxLength={40}
-              />
-            </label>
-            <label className={errField === 'country' ? 'err' : ''}>
-              <span>Country *</span>
-              <select value={form.country} onChange={(e) => set('country', e.target.value)} required>
-                {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
-              </select>
-            </label>
-          </div>
-
-          <label className={errField === 'address_line1' ? 'err' : ''}>
-            <span>Address line 1 *</span>
-            <input
-              value={form.address_line1}
-              onChange={(e) => set('address_line1', e.target.value)}
-              placeholder="Street and house / building no."
-              maxLength={255}
-              required
-            />
-          </label>
-
-          <label className={errField === 'address_line2' ? 'err' : ''}>
-            <span>Address line 2</span>
-            <input
-              value={form.address_line2}
-              onChange={(e) => set('address_line2', e.target.value)}
-              placeholder="Apartment, suite, landmark (optional)"
-              maxLength={255}
-            />
-          </label>
-
-          <div className="gw-form-row three">
-            <label className={errField === 'city' ? 'err' : ''}>
-              <span>City *</span>
-              <input value={form.city} onChange={(e) => set('city', e.target.value)} maxLength={120} required />
-            </label>
-            <label className={errField === 'state' ? 'err' : ''}>
-              <span>State / Province *</span>
-              <input value={form.state} onChange={(e) => set('state', e.target.value)} maxLength={120} required />
-            </label>
-            <label className={errField === 'postal_code' ? 'err' : ''}>
-              <span>Postal / ZIP *</span>
-              <input
-                value={form.postal_code}
-                onChange={(e) => set('postal_code', e.target.value)}
-                placeholder={form.country === 'IN' ? '6-digit PIN' : ''}
-                maxLength={20}
+                inputMode="tel"
                 required
               />
             </label>
-          </div>
+            <label className={errField === 'full_name' ? 'err' : ''}>
+              <span>Name *</span>
+              <input
+                value={form.full_name}
+                onChange={(e) => set('full_name', e.target.value)}
+                placeholder="Your name"
+                maxLength={120}
+                required
+              />
+            </label>
+            <label>
+              <span>Country</span>
+              <input value="India" disabled readOnly />
+            </label>
+            <div className="gw-form-row">
+              <label className={errField === 'city' ? 'err' : ''}>
+                <span>City *</span>
+                <input value={form.city} onChange={(e) => set('city', e.target.value)} maxLength={120} required />
+              </label>
+              <label className={errField === 'postal_code' ? 'err' : ''}>
+                <span>Postal / ZIP *</span>
+                <input
+                  value={form.postal_code}
+                  onChange={(e) => set('postal_code', e.target.value)}
+                  placeholder="6-digit PIN"
+                  maxLength={6}
+                  inputMode="numeric"
+                  required
+                />
+              </label>
+            </div>
+            <div className="gw-modal-actions">
+              <button type="button" className="gw-btn-ghost" onClick={onClose}>Cancel</button>
+              <button type="submit" className="gw-btn-primary">Continue</button>
+            </div>
+          </form>
+        ) : (
+          <div className="gw-confirm">
+            <div className="gw-confirm-block">
+              <div className="gw-confirm-block-h">Billing to</div>
+              <div className="gw-confirm-rows">
+                <div><span>Name</span><b>{form.full_name}</b></div>
+                <div><span>Email</span><b>{form.email}</b></div>
+                <div><span>Mobile</span><b>{form.phone}</b></div>
+                <div><span>Country</span><b>India</b></div>
+                <div><span>City</span><b>{form.city}</b></div>
+                <div><span>Postal / ZIP</span><b>{form.postal_code}</b></div>
+              </div>
+              <button type="button" className="gw-btn-ghost xs gw-confirm-edit" onClick={() => setStep('form')} disabled={saving}>
+                Edit details
+              </button>
+            </div>
 
-          <label className={errField === 'tax_id' ? 'err' : ''}>
-            <span>Tax ID / GSTIN</span>
-            <input
-              value={form.tax_id}
-              onChange={(e) => set('tax_id', e.target.value)}
-              placeholder="Optional"
-              maxLength={64}
-            />
-          </label>
+            <div className="gw-confirm-block">
+              <div className="gw-confirm-block-h">Selected plan</div>
+              <div className="gw-confirm-plan">
+                <div>
+                  <b>{plan.name}</b>
+                  <div className="gw-muted" style={{ fontSize: 12 }}>{labelMethod(plan.method_access)} · {plan.duration_days >= 200 ? '1 year' : `${plan.duration_days} days`}</div>
+                </div>
+                <div className="gw-confirm-amt">₹{planPrice.toFixed(2)}</div>
+              </div>
+            </div>
 
-          <div className="gw-modal-actions">
-            <button type="button" className="gw-btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
-            <button type="submit" className="gw-btn-primary" disabled={saving}>
-              {saving ? 'Saving…' : initial ? 'Save & continue' : 'Save details'}
-            </button>
+            <div className="gw-confirm-block totals">
+              <div className="gw-confirm-line">
+                <span>Plan</span><span>₹{planPrice.toFixed(2)}</span>
+              </div>
+              <div className="gw-confirm-line">
+                <span>Fee</span><span>{fee > 0 ? `₹${fee.toFixed(2)}` : '₹0.00'}</span>
+              </div>
+              <div className="gw-confirm-line total">
+                <span>Total payable</span><span>₹{total.toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div className="gw-modal-actions">
+              <button type="button" className="gw-btn-ghost" onClick={() => setStep('form')} disabled={saving}>Back</button>
+              <button type="button" className="gw-btn-primary" onClick={confirm} disabled={saving}>
+                {saving ? 'Starting…' : `Confirm & pay ₹${total.toFixed(2)}`}
+              </button>
+            </div>
           </div>
-        </form>
+        )}
       </div>
     </div>
   );

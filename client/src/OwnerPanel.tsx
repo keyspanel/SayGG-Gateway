@@ -278,6 +278,7 @@ export function OwnerUsers() {
   const [q, setQ] = useState('');
   const [err, setErr] = useState('');
   const [grantFor, setGrantFor] = useState<any | null>(null);
+  const [detailsFor, setDetailsFor] = useState<any | null>(null);
   const [plans, setPlans] = useState<any[]>([]);
 
   const load = async (off = 0) => {
@@ -358,6 +359,7 @@ export function OwnerUsers() {
               </span>
               <span data-label="Last seen" className="gw-muted" style={{ fontSize: 12 }}>{u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : '—'}</span>
               <span data-label="">
+                <button className="gw-btn-ghost sm" onClick={() => setDetailsFor(u)} title="View billing details">Details</button>
                 <button className="gw-btn-ghost sm" onClick={() => setGrantFor(u)}>Grant plan</button>
                 {u.active_subscription && (
                   <>
@@ -383,7 +385,67 @@ export function OwnerUsers() {
       {grantFor && (
         <GrantDialog user={grantFor} plans={plans} onClose={() => setGrantFor(null)} onSubmit={grant} />
       )}
+      {detailsFor && (
+        <UserDetailsDialog user={detailsFor} onClose={() => setDetailsFor(null)} />
+      )}
     </>
+  );
+}
+
+function UserDetailsDialog({ user, onClose }: { user: any; onClose: () => void }) {
+  const bp = user.billing_profile;
+  return (
+    <div className="gw-modal-overlay" onClick={onClose}>
+      <div className="gw-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-labelledby="ud-h">
+        <div className="gw-sheet-handle" aria-hidden="true" />
+        <div className="gw-sheet-h">
+          <div>
+            <h3 id="ud-h">{user.username}</h3>
+            <p className="gw-muted">{user.email}{user.role === 'owner' ? ' · owner' : ''}</p>
+          </div>
+          <button className="gw-btn-ghost xs" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        <div className="gw-confirm-block">
+          <div className="gw-confirm-block-h">Account</div>
+          <div className="gw-confirm-rows">
+            <div><span>User ID</span><b>#{user.id}</b></div>
+            <div><span>Status</span><b>{user.is_active ? 'active' : 'disabled'}</b></div>
+            <div><span>Account email</span><b>{user.email}</b></div>
+            <div><span>Created</span><b>{new Date(user.created_at).toLocaleString()}</b></div>
+            <div><span>Last seen</span><b>{user.last_seen_at ? new Date(user.last_seen_at).toLocaleString() : '—'}</b></div>
+            <div><span>Active plan</span><b>{user.active_subscription?.plan_name || '— none —'}</b></div>
+          </div>
+        </div>
+
+        <div className="gw-confirm-block">
+          <div className="gw-confirm-block-h">Billing details {bp ? '' : <span className="gw-muted" style={{ fontWeight: 500, fontSize: 12 }}>· not provided yet</span>}</div>
+          {bp ? (
+            <div className="gw-confirm-rows">
+              <div><span>Name</span><b>{bp.full_name}</b></div>
+              <div><span>Email</span><b>{bp.email}</b></div>
+              <div><span>Mobile</span><b>{bp.phone || '—'}</b></div>
+              <div><span>Country</span><b>{bp.country || '—'}</b></div>
+              <div><span>City</span><b>{bp.city || '—'}</b></div>
+              <div><span>State</span><b>{bp.state || '—'}</b></div>
+              <div><span>Postal / ZIP</span><b>{bp.postal_code || '—'}</b></div>
+              {bp.address_line1 && <div><span>Address line 1</span><b>{bp.address_line1}</b></div>}
+              {bp.address_line2 && <div><span>Address line 2</span><b>{bp.address_line2}</b></div>}
+              {bp.tax_id && <div><span>Tax ID / GSTIN</span><b>{bp.tax_id}</b></div>}
+              {bp.updated_at && <div><span>Last updated</span><b>{new Date(bp.updated_at).toLocaleString()}</b></div>}
+            </div>
+          ) : (
+            <p className="gw-muted" style={{ margin: 0, fontSize: 13 }}>
+              This user hasn't completed the checkout form yet, so no billing email or address is on file.
+            </p>
+          )}
+        </div>
+
+        <div className="gw-modal-actions">
+          <button type="button" className="gw-btn-primary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -495,7 +557,7 @@ export function OwnerPlanOrders() {
 /* ------------------------------------------------------- Platform settings */
 
 export function OwnerPlatformSettings() {
-  const [f, setF] = useState({ paytm_upi_id: '', paytm_merchant_id: '', paytm_merchant_key: '', paytm_env: 'production', payee_name: '' });
+  const [f, setF] = useState({ paytm_upi_id: '', paytm_merchant_id: '', paytm_merchant_key: '', paytm_env: 'production', payee_name: '', plan_platform_fee: '0' });
   const [hasKey, setHasKey] = useState(false);
   const [maskedKey, setMaskedKey] = useState('');
   const [active, setActive] = useState(false);
@@ -511,6 +573,7 @@ export function OwnerPlatformSettings() {
         paytm_merchant_id: d.paytm_merchant_id || '',
         paytm_env: d.paytm_env || 'production',
         payee_name: d.payee_name || '',
+        plan_platform_fee: d.plan_platform_fee != null ? String(d.plan_platform_fee) : '0',
       }));
       setHasKey(!!d.has_key); setMaskedKey(d.paytm_merchant_key_masked || '');
       setActive(!!d.is_active);
@@ -547,6 +610,16 @@ export function OwnerPlatformSettings() {
           <input type="password" value={f.paytm_merchant_key} onChange={(e) => setF((s) => ({ ...s, paytm_merchant_key: e.target.value }))} placeholder={hasKey ? 'Leave blank to keep saved key' : 'Enter merchant key'} autoComplete="off" />
         </label>
         <label className="gw-field"><span>Display name <small>optional</small></span><input value={f.payee_name} onChange={(e) => setF((s) => ({ ...s, payee_name: e.target.value }))} placeholder="PayGateway" /></label>
+        <label className="gw-field"><span>Plan platform fee (₹) <small>added on top of every plan price · default 0</small></span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={f.plan_platform_fee}
+            onChange={(e) => setF((s) => ({ ...s, plan_platform_fee: e.target.value }))}
+            placeholder="0"
+          />
+        </label>
         <label className="gw-field"><span>Environment</span>
           <div className="gw-select-wrap">
             <select value={f.paytm_env} onChange={(e) => setF((s) => ({ ...s, paytm_env: e.target.value }))}>

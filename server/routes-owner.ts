@@ -261,7 +261,20 @@ router.get('/users', async (req, res: Response) => {
                JOIN gw_plans p ON p.id=s.plan_id
               WHERE s.user_id=u.id AND s.status='active' AND (s.expires_at IS NULL OR s.expires_at > NOW())
               ORDER BY s.expires_at DESC NULLS LAST LIMIT 1) AS active_subscription,
-            (SELECT COUNT(*)::int FROM gw_orders o WHERE o.user_id=u.id) AS orders_count
+            (SELECT COUNT(*)::int FROM gw_orders o WHERE o.user_id=u.id) AS orders_count,
+            (SELECT json_build_object(
+                      'full_name', bp.full_name,
+                      'email', bp.email,
+                      'phone', bp.phone,
+                      'country', bp.country,
+                      'address_line1', bp.address_line1,
+                      'address_line2', bp.address_line2,
+                      'city', bp.city,
+                      'state', bp.state,
+                      'postal_code', bp.postal_code,
+                      'tax_id', bp.tax_id,
+                      'updated_at', bp.updated_at)
+               FROM gw_billing_profiles bp WHERE bp.user_id=u.id) AS billing_profile
        FROM gw_users u
       WHERE ${where.join(' AND ')}
       ORDER BY u.id DESC
@@ -423,6 +436,13 @@ function maskKey(key: string | null | undefined): string {
 
 router.get('/platform-settings', async (_req, res: Response) => {
   const s = await getPlatformSettings();
+  // plan_platform_fee may not be on the cached settings interface; read directly.
+  let fee = 0;
+  try {
+    const r = await pool.query(`SELECT plan_platform_fee FROM gw_platform_settings ORDER BY id ASC LIMIT 1`);
+    const v = r.rows[0]?.plan_platform_fee;
+    fee = v == null ? 0 : Math.max(0, parseFloat(v) || 0);
+  } catch {}
   apiSuccess(res, 'Platform settings loaded', {
     payee_name: s?.payee_name || '',
     paytm_upi_id: s?.paytm_upi_id || '',
@@ -431,6 +451,7 @@ router.get('/platform-settings', async (_req, res: Response) => {
     has_key: !!s?.paytm_merchant_key,
     paytm_env: s?.paytm_env || 'production',
     is_active: !!s?.is_active,
+    plan_platform_fee: fee,
   });
 });
 
@@ -449,6 +470,15 @@ router.put('/platform-settings', async (req, res: Response) => {
   if (!['production', 'staging'].includes(env)) return apiError(res, 400, 'Invalid env', 'VALIDATION_ERROR', { field: 'paytm_env' });
   if (payee.length > 120) return apiError(res, 400, 'Payee name too long', 'VALIDATION_ERROR', { field: 'payee_name' });
 
+  // Optional plan_platform_fee — defaults to 0, must be a non-negative number.
+  let fee = 0;
+  if (body.plan_platform_fee !== undefined && body.plan_platform_fee !== null && String(body.plan_platform_fee) !== '') {
+    const n = parseFloat(String(body.plan_platform_fee));
+    if (!isFinite(n) || n < 0) return apiError(res, 400, 'Fee must be a non-negative number', 'VALIDATION_ERROR', { field: 'plan_platform_fee' });
+    if (n > 100000) return apiError(res, 400, 'Fee is unreasonably high (max 100000)', 'VALIDATION_ERROR', { field: 'plan_platform_fee' });
+    fee = Math.round(n * 100) / 100;
+  }
+
   const ex = await getPlatformSettings();
   let finalKey = mkeyRaw;
   if (!finalKey) finalKey = ex?.paytm_merchant_key || '';
@@ -459,17 +489,17 @@ router.put('/platform-settings', async (req, res: Response) => {
     await pool.query(
       `UPDATE gw_platform_settings SET
          payee_name=$1, paytm_upi_id=$2, paytm_merchant_id=$3, paytm_merchant_key=$4,
-         paytm_env=$5, is_active=$6, updated_at=NOW() WHERE id=$7`,
-      [payee || null, upi, mid, finalKey, env, isActive, ex.id],
+         paytm_env=$5, is_active=$6, plan_platform_fee=$7, updated_at=NOW() WHERE id=$8`,
+      [payee || null, upi, mid, finalKey, env, isActive, fee.toFixed(2), ex.id],
     );
   } else {
     await pool.query(
-      `INSERT INTO gw_platform_settings (payee_name, paytm_upi_id, paytm_merchant_id, paytm_merchant_key, paytm_env, is_active)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
-      [payee || null, upi, mid, finalKey, env, isActive],
+      `INSERT INTO gw_platform_settings (payee_name, paytm_upi_id, paytm_merchant_id, paytm_merchant_key, paytm_env, is_active, plan_platform_fee)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [payee || null, upi, mid, finalKey, env, isActive, fee.toFixed(2)],
     );
   }
-  apiSuccess(res, 'Platform settings saved', { is_active: isActive });
+  apiSuccess(res, 'Platform settings saved', { is_active: isActive, plan_platform_fee: fee });
 });
 
 /* -------------------------------------------------------------------------- */

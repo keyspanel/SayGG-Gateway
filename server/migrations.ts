@@ -205,15 +205,23 @@ CREATE TABLE IF NOT EXISTS gw_billing_profiles (
   email VARCHAR(255) NOT NULL,
   phone VARCHAR(40),
   country VARCHAR(2) NOT NULL,
-  address_line1 VARCHAR(255) NOT NULL,
+  address_line1 VARCHAR(255),
   address_line2 VARCHAR(255),
   city VARCHAR(120) NOT NULL,
-  state VARCHAR(120) NOT NULL,
+  state VARCHAR(120),
   postal_code VARCHAR(20) NOT NULL,
   tax_id VARCHAR(64),
   created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
+
+-- Relax NOT NULL on legacy installs (older schema required these fields)
+ALTER TABLE gw_billing_profiles ALTER COLUMN address_line1 DROP NOT NULL;
+ALTER TABLE gw_billing_profiles ALTER COLUMN state DROP NOT NULL;
+-- Phone is now mandatory (mobile number); keep DDL nullable but enforced in app layer
+
+-- Owner-controlled flat fee added on top of every plan's price (default 0)
+ALTER TABLE gw_platform_settings ADD COLUMN IF NOT EXISTS plan_platform_fee NUMERIC(12,2) DEFAULT 0 NOT NULL;
 `;
 
 interface PlanSeed {

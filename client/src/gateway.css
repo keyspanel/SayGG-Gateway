@@ -2850,6 +2850,88 @@ code {
   padding: 4px 10px; font-size: 12px; border-radius: 6px;
 }
 
+/* Bottom-sheet style checkout / details panel */
+.gw-sheet {
+  width: 100%; max-width: 520px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background: var(--gw-surface);
+  border: 1px solid var(--gw-border);
+  border-radius: 18px;
+  box-shadow: 0 28px 70px rgba(2,6,23,0.32);
+  padding: 18px 22px 22px;
+  display: flex; flex-direction: column; gap: 14px;
+  animation: gwSheetIn .2s ease-out;
+}
+:root[data-theme="dark"] .gw-sheet {
+  box-shadow: 0 28px 70px rgba(0,0,0,0.65);
+}
+@keyframes gwSheetIn {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.gw-sheet-handle {
+  width: 44px; height: 4px; border-radius: 999px;
+  background: var(--gw-border-strong);
+  margin: 0 auto 4px; opacity: 0.7;
+}
+.gw-sheet-h {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+}
+.gw-sheet-h h3 { margin: 0 0 2px; font-size: 17px; color: var(--gw-text); }
+.gw-sheet-h p { margin: 0; font-size: 12.5px; }
+
+@media (max-width: 540px) {
+  .gw-modal-overlay { align-items: flex-end; padding: 0; }
+  .gw-sheet {
+    max-width: 100%;
+    border-radius: 18px 18px 0 0;
+    max-height: 92vh;
+  }
+}
+
+/* Confirmation step blocks */
+.gw-confirm { display: flex; flex-direction: column; gap: 12px; }
+.gw-confirm-block {
+  background: var(--gw-surface-2);
+  border: 1px solid var(--gw-border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  position: relative;
+}
+.gw-confirm-block.totals { background: transparent; border: 0; padding: 0; }
+.gw-confirm-block-h {
+  font-size: 11.5px; font-weight: 800; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--gw-text-mute);
+  margin-bottom: 8px;
+}
+.gw-confirm-rows { display: flex; flex-direction: column; gap: 6px; }
+.gw-confirm-rows > div {
+  display: flex; justify-content: space-between; gap: 12px;
+  font-size: 13px; color: var(--gw-text);
+}
+.gw-confirm-rows > div > span { color: var(--gw-text-mute); }
+.gw-confirm-rows > div > b { font-weight: 700; text-align: right; word-break: break-word; }
+.gw-confirm-edit {
+  position: absolute; top: 10px; right: 12px;
+}
+.gw-confirm-plan {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.gw-confirm-amt {
+  font-size: 18px; font-weight: 800; color: var(--gw-text);
+}
+.gw-confirm-line {
+  display: flex; justify-content: space-between;
+  font-size: 13.5px; color: var(--gw-text-mute);
+  padding: 6px 4px;
+}
+.gw-confirm-line.total {
+  font-size: 16px; font-weight: 800; color: var(--gw-text);
+  border-top: 1px dashed var(--gw-border);
+  padding-top: 10px; margin-top: 4px;
+}
+
 /* Current plan summary (Billing page) */
 .gw-billing-current {
   display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;

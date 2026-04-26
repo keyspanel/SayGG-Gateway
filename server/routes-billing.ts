@@ -82,27 +82,29 @@ function validateBillingProfile(body: BillingProfileInput): { ok: true; data: No
   const email = trimStr(body.email, 255).toLowerCase();
   if (!EMAIL_RE.test(email)) return { ok: false, field: 'email', message: 'Enter a valid email address.' };
 
+  // Mobile number is mandatory in the new flow.
   const phoneRaw = trimStr(body.phone, 40);
-  let phone: string | null = null;
-  if (phoneRaw) {
-    if (!/^[\+]?[0-9\-\s\(\)]{6,40}$/.test(phoneRaw)) return { ok: false, field: 'phone', message: 'Phone number looks invalid.' };
-    phone = phoneRaw;
+  if (!phoneRaw) return { ok: false, field: 'phone', message: 'Mobile number is required.' };
+  if (!/^[\+]?[0-9\-\s\(\)]{6,40}$/.test(phoneRaw)) {
+    return { ok: false, field: 'phone', message: 'Mobile number looks invalid.' };
   }
+  const phone: string | null = phoneRaw;
 
-  const country = trimStr(body.country, 2).toUpperCase();
-  if (!SUPPORTED_COUNTRIES.includes(country)) return { ok: false, field: 'country', message: 'Pick a country from the list.' };
+  // Country is fixed to India in the simplified flow but we still validate.
+  const country = (trimStr(body.country, 2) || 'IN').toUpperCase();
+  if (!SUPPORTED_COUNTRIES.includes(country)) return { ok: false, field: 'country', message: 'Unsupported country.' };
 
-  const address_line1 = trimStr(body.address_line1, 255);
-  if (address_line1.length < 3) return { ok: false, field: 'address_line1', message: 'Address line 1 is required.' };
-
+  // Address line 1/2 and state are optional in the simplified flow.
+  const address_line1Raw = trimStr(body.address_line1, 255);
+  const address_line1 = address_line1Raw || null;
   const address_line2Raw = trimStr(body.address_line2, 255);
   const address_line2 = address_line2Raw || null;
 
   const city = trimStr(body.city, 120);
   if (city.length < 2) return { ok: false, field: 'city', message: 'City is required.' };
 
-  const state = trimStr(body.state, 120);
-  if (state.length < 2) return { ok: false, field: 'state', message: 'State / province is required.' };
+  const stateRaw = trimStr(body.state, 120);
+  const state = stateRaw || null;
 
   const postal_code = trimStr(body.postal_code, 20);
   if (postal_code.length < 3) return { ok: false, field: 'postal_code', message: 'Postal / ZIP code is required.' };
@@ -116,6 +118,18 @@ function validateBillingProfile(body: BillingProfileInput): { ok: true; data: No
   return { ok: true, data: {
     full_name, email, phone, country, address_line1, address_line2, city, state, postal_code, tax_id,
   } };
+}
+
+/* Owner-configurable platform fee (added on top of every plan price) */
+async function getPlatformFee(): Promise<number> {
+  try {
+    const r = await pool.query(`SELECT plan_platform_fee FROM gw_platform_settings ORDER BY id ASC LIMIT 1`);
+    const v = r.rows[0]?.plan_platform_fee;
+    const n = v == null ? 0 : parseFloat(v);
+    return isFinite(n) && n >= 0 ? n : 0;
+  } catch {
+    return 0;
+  }
 }
 
 async function getBillingProfile(userId: number): Promise<NormalizedProfile | null> {
@@ -193,8 +207,15 @@ function shapeSubscriptionOrder(o: any, includeUpi = false) {
 /* -------------------------------------------------------------------------- */
 
 router.get('/plans', async (_req: Request, res: Response) => {
-  const r = await pool.query(`SELECT * FROM gw_plans WHERE is_active=TRUE ORDER BY sort_order ASC, id ASC`);
-  apiSuccess(res, 'Plans loaded', { items: r.rows.map(shapePlan) });
+  const [r, fee] = await Promise.all([
+    pool.query(`SELECT * FROM gw_plans WHERE is_active=TRUE ORDER BY sort_order ASC, id ASC`),
+    getPlatformFee(),
+  ]);
+  apiSuccess(res, 'Plans loaded', {
+    items: r.rows.map(shapePlan),
+    platform_fee: fee,
+    currency: 'INR',
+  });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -222,11 +243,12 @@ router.get('/me', gwSession, async (req: GwSessionRequest, res: Response) => {
       ORDER BY s.id DESC LIMIT 20`,
     [user.id],
   );
-  const profile = await getBillingProfile(user.id);
+  const [profile, fee] = await Promise.all([getBillingProfile(user.id), getPlatformFee()]);
   apiSuccess(res, 'Billing summary loaded', {
     is_owner: isOwner(user),
     active_subscription: sub,
     billing_profile: profile,
+    platform_fee: fee,
     history: history.rows,
     recent_orders: orders.rows,
   });
@@ -285,8 +307,10 @@ router.post('/purchase', gwSession, purchaseLimiter, async (req: GwSessionReques
     return apiSuccess(res, 'Existing pending order returned', shapeSubscriptionOrder(existing.rows[0], true));
   }
 
-  const amount = parseFloat(plan.discount_price ?? plan.price);
-  if (!isFinite(amount) || amount < 0) return apiError(res, 500, 'Plan price is invalid', 'INTERNAL_ERROR');
+  const baseAmount = parseFloat(plan.discount_price ?? plan.price);
+  if (!isFinite(baseAmount) || baseAmount < 0) return apiError(res, 500, 'Plan price is invalid', 'INTERNAL_ERROR');
+  const fee = await getPlatformFee();
+  const amount = Math.round((baseAmount + fee) * 100) / 100;
 
   const txnRef = buildUniqueTxnRef('B' + user.id);
   const upiPayload = buildUpiPayload({
