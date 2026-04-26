@@ -335,14 +335,14 @@ export default function BillingCheckoutDetails() {
       <CheckoutSummaryMini plan={plan} planPrice={planPrice} fee={fee} total={total} hideTrustFooter />
 
       <div className="gw-card gw-checkout-form-card">
+        {err && <div className="gw-alert error"><span>{err}</span></div>}
+
         <div className="gw-card-h">
           <div>
             <h2 style={{ margin: 0 }}>Billing details</h2>
             <p className="gw-muted" style={{ margin: '4px 0 0' }}>Required for invoicing. Stored against your account.</p>
           </div>
         </div>
-
-        {err && <div className="gw-alert error"><span>{err}</span></div>}
 
         <form className="gw-billing-form" onSubmit={onSubmit} noValidate>
             <label className={errField === 'email' ? 'err' : ''}>
