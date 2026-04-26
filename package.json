@@ -5,8 +5,10 @@
   "description": "Standalone Payment Gateway website + public API (isolated from Keys Bot).",
   "scripts": {
     "build": "vite build --config client/vite.config.ts",
-    "start": "tsx server/index.ts",
-    "dev": "npm run build && npm run start"
+    "start": "NODE_ENV=production tsx server/index.ts",
+    "start:dev": "tsx server/index.ts",
+    "dev": "npm run build && npm run start:dev",
+    "preview": "npm run build && npm run start"
   },
   "dependencies": {
     "@types/cors": "^2.8.19",

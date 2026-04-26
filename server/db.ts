@@ -1,8 +1,11 @@
 import { Pool } from 'pg';
 import config from './config';
 
+const useSsl = String(process.env.DATABASE_SSL || '').toLowerCase() === 'true';
+
 const pool = new Pool({
   connectionString: config.database.url,
+  ssl: useSsl ? { rejectUnauthorized: false } : undefined,
 });
 
 pool
