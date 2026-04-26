@@ -1,13 +1,15 @@
 import express, { Request, Response } from 'express';
 import crypto from 'crypto';
+import QRCode from 'qrcode';
 import pool from './db';
 import { gwSession, GwSessionRequest } from './auth-mw';
 import { apiError, apiSuccess, methodNotAllowed } from './api-response';
 import { getActiveSubscription, getPlatformSettings, isPlatformConfigured, isOwner } from './authz';
 import { buildUniqueTxnRef, buildUpiPayload } from './paytm';
-import { rateLimit } from './rate-limit';
+import { rateLimit, tryAcquireConcurrent, releaseConcurrent, clientIp } from './rate-limit';
 import { isValidPublicToken } from './validation';
 import { refreshSubscriptionOrder } from './billing-verify';
+import { subscribeBillingOrder, publishBillingSnapshot } from './billing-events';
 
 const router = express.Router();
 
@@ -176,30 +178,50 @@ router.post('/profile', gwSession, async (req: GwSessionRequest, res: Response) 
 
 router.all('/profile', methodNotAllowed(['GET','POST']));
 
-function shapeSubscriptionOrder(o: any, includeUpi = false) {
+function shapeSubscriptionOrder(o: any, includeUpi = false, opts: { origin?: string } = {}) {
   const isTerminal = ['paid', 'failed', 'expired', 'cancelled'].includes(o.status);
+  const isExpiredNow = !!(o.expires_at && new Date(o.expires_at).getTime() < Date.now());
+  // Same gating rule as the merchant hosted page: only expose redirect URL
+  // once paid, only expose cancel URL once we've reached a non-paid terminal
+  // state. While pending we never leak either URL to the browser.
+  const exposeRedirect = o.status === 'paid';
+  const exposeCancel = isTerminal && o.status !== 'paid';
+  const origin = opts.origin || '';
   const out: any = {
-    id: o.id,
-    txn_ref: o.txn_ref,
+    // PayPage-compatible fields (drives the hosted page UI)
     public_token: o.public_token,
+    txn_ref: o.txn_ref,
+    client_order_id: null,
     amount: parseFloat(o.amount),
     currency: o.currency,
     status: o.status,
+    note: o.plan_name ? `${o.plan_name} (${o.plan_key})` : null,
+    payee_name: o.platform_payee_name || 'Platform',
+    upi_payload: includeUpi ? o.upi_payload : null,
+    payment_link: includeUpi ? (o.payment_link || o.upi_payload) : null,
+    created_at: o.created_at,
+    expires_at: o.expires_at,
+    verified_at: o.paid_at || null,
+    is_terminal: isTerminal,
+    is_expired: isExpiredNow,
+    bank_rrn: o.bank_rrn || o.gateway_bank_txn_id || null,
+    redirect_url: exposeRedirect && origin ? `${origin}/gateway/billing/success` : null,
+    cancel_url: exposeCancel && origin ? `${origin}/gateway/billing` : null,
+    // Billing-specific extras used by the dashboard / history list
+    id: o.id,
     plan_id: o.plan_id,
     plan_key: o.plan_key,
     plan_name: o.plan_name,
-    expires_at: o.expires_at,
     paid_at: o.paid_at,
-    created_at: o.created_at,
-    is_terminal: isTerminal,
-    activated_subscription_id: o.activated_subscription_id,
-    bank_rrn: o.bank_rrn || o.gateway_bank_txn_id,
+    activated_subscription_id: o.activated_subscription_id || null,
   };
-  if (includeUpi) {
-    out.upi_payload = o.upi_payload;
-    out.payment_link = o.payment_link || o.upi_payload;
-  }
   return out;
+}
+
+function reqOrigin(req: Request): string {
+  const proto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim() || req.protocol;
+  const host = req.get('host');
+  return host ? `${proto}://${host}` : '';
 }
 
 /* -------------------------------------------------------------------------- */
@@ -377,6 +399,14 @@ async function loadPlanOrderByToken(token: string) {
   return r.rows[0] || null;
 }
 
+function shapeForPage(order: any, origin: string) {
+  return {
+    ...shapeSubscriptionOrder(order, true, { origin }),
+    plan: { plan_key: order.plan_key, name: order.plan_name, method_access: order.method_access, duration_days: order.duration_days },
+    payee_name: order.platform_payee_name || 'Platform',
+  };
+}
+
 router.get('/pay/:token', billTokenGuard, billGetLimiter, async (req: Request, res: Response) => {
   let order = await loadPlanOrderByToken(req.params.token);
   if (!order) return apiError(res, 404, 'Plan payment link not found', 'PAYMENT_NOT_FOUND');
@@ -387,11 +417,10 @@ router.get('/pay/:token', billTokenGuard, billGetLimiter, async (req: Request, r
     order = await loadPlanOrderByToken(req.params.token);
   }
 
-  apiSuccess(res, 'Plan order loaded', {
-    ...shapeSubscriptionOrder(order, true),
-    plan: { plan_key: order.plan_key, name: order.plan_name, method_access: order.method_access, duration_days: order.duration_days },
-    payee_name: order.platform_payee_name || 'Platform',
-  });
+  const origin = reqOrigin(req);
+  const snap = shapeForPage(order, origin);
+  publishBillingSnapshot(req.params.token, snap);
+  apiSuccess(res, 'Plan order loaded', snap);
 });
 
 router.post('/pay/:token/refresh', billTokenGuard, billRefreshLimiter, async (req: Request, res: Response) => {
@@ -401,11 +430,164 @@ router.post('/pay/:token/refresh', billTokenGuard, billRefreshLimiter, async (re
   await refreshSubscriptionOrder(order.id);
   const fresh = await loadPlanOrderByToken(req.params.token);
   if (!fresh) return apiError(res, 404, 'Plan payment link not found', 'PAYMENT_NOT_FOUND');
-  apiSuccess(res, 'Plan order refreshed', {
-    ...shapeSubscriptionOrder(fresh, true),
-    plan: { plan_key: fresh.plan_key, name: fresh.plan_name, method_access: fresh.method_access, duration_days: fresh.duration_days },
-    payee_name: fresh.platform_payee_name || 'Platform',
+  const origin = reqOrigin(req);
+  const snap = shapeForPage(fresh, origin);
+  publishBillingSnapshot(req.params.token, snap);
+  apiSuccess(res, 'Plan order refreshed', snap);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Server-Sent Events stream — mirrors /api/pay/:token/stream so the same     */
+/* hosted PayPage component drives both merchant and platform-billing pages. */
+/* -------------------------------------------------------------------------- */
+
+const billSseLimiter = rateLimit({
+  name: 'bill_sse_connect', windowMs: 60_000, max: 30,
+  message: 'Too many connection attempts. Please wait.', code: 'RATE_LIMITED_PAY_STREAM',
+});
+const BILL_SSE_PER_IP_MAX = 6;
+
+router.get('/pay/:token/stream', billTokenGuard, billSseLimiter, async (req: Request, res: Response) => {
+  const token = req.params.token;
+  const ip = clientIp(req);
+
+  if (!tryAcquireConcurrent('bill_sse', ip, BILL_SSE_PER_IP_MAX)) {
+    return apiError(res, 429, 'Too many open connections from this client.', 'SSE_TOO_MANY', { retry_after_seconds: 30 });
+  }
+
+  let order = await loadPlanOrderByToken(token);
+  if (!order) {
+    releaseConcurrent('bill_sse', ip);
+    return apiError(res, 404, 'Plan payment link not found', 'PAYMENT_NOT_FOUND');
+  }
+
+  res.status(200).set({
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
   });
+  res.flushHeaders?.();
+
+  const send = (event: string, data: unknown) => {
+    try {
+      res.write(`event: ${event}\n`);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    } catch { /* connection probably gone */ }
+  };
+
+  // Initial snapshot — auto-expire if needed before sending.
+  if (order.status === 'pending' && order.expires_at && new Date(order.expires_at).getTime() < Date.now()) {
+    await pool.query(`UPDATE gw_subscription_orders SET status='expired', updated_at=NOW() WHERE id=$1 AND status='pending'`, [order.id]);
+    order = await loadPlanOrderByToken(token);
+    if (!order) {
+      releaseConcurrent('bill_sse', ip);
+      try { res.end(); } catch { /* noop */ }
+      return;
+    }
+  }
+
+  const origin = reqOrigin(req);
+  const initialSnap = shapeForPage(order, origin);
+  send('snapshot', initialSnap);
+
+  if (initialSnap.is_terminal) {
+    send('end', { reason: 'terminal' });
+    res.end();
+    releaseConcurrent('bill_sse', ip);
+    return;
+  }
+
+  let cleaned = false;
+  const unsubscribe = subscribeBillingOrder(
+    token,
+    (row) => shapeForPage(row, origin),
+    (snap) => {
+      send('update', snap);
+      if (snap.is_terminal) {
+        send('end', { reason: 'terminal' });
+        try { res.end(); } catch { /* noop */ }
+      }
+    },
+  );
+
+  const ping = setInterval(() => {
+    try { res.write(`: ping ${Date.now()}\n\n`); } catch { /* noop */ }
+  }, 25_000);
+
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    clearInterval(ping);
+    try { unsubscribe(); } catch { /* noop */ }
+    releaseConcurrent('bill_sse', ip);
+  };
+  req.on('close', cleanup);
+  req.on('aborted', cleanup);
+  res.on('close', cleanup);
+});
+
+/* -------------------------------------------------------------------------- */
+/* QR PNG endpoint — same shape and rules as /api/pay/:token/qr.png so the    */
+/* "Download QR Code" / "Share QR" buttons on PayPage work identically.       */
+/* -------------------------------------------------------------------------- */
+
+const billQrLimiter = rateLimit({
+  name: 'bill_qr', windowMs: 60_000, max: 60,
+  message: 'Too many QR requests. Please wait.', code: 'RATE_LIMITED_PAY_QR',
+});
+
+const BILL_ALLOWED_QR_SIZES = [512, 1024, 1080, 2048, 4096] as const;
+type BillQrSize = typeof BILL_ALLOWED_QR_SIZES[number];
+const BILL_DEFAULT_QR_SIZE: BillQrSize = 2048;
+const BILL_FALLBACK_QR_SIZE: BillQrSize = 2048;
+
+function pickBillQrSize(raw: unknown): BillQrSize {
+  const n = parseInt(String(raw ?? ''), 10);
+  return (BILL_ALLOWED_QR_SIZES as readonly number[]).includes(n) ? (n as BillQrSize) : BILL_DEFAULT_QR_SIZE;
+}
+
+async function renderBillQrPng(payload: string, width: BillQrSize): Promise<Buffer> {
+  return QRCode.toBuffer(payload, {
+    type: 'png',
+    errorCorrectionLevel: 'H',
+    margin: 4,
+    width,
+    color: { dark: '#000000', light: '#FFFFFF' },
+  });
+}
+
+router.get('/pay/:token/qr.png', billTokenGuard, billQrLimiter, async (req: Request, res: Response) => {
+  try {
+    const order = await loadPlanOrderByToken(req.params.token);
+    if (!order || !order.upi_payload) {
+      return res.status(404).json({ success: false, message: 'QR not available', code: 'QR_NOT_AVAILABLE' });
+    }
+
+    const requested = pickBillQrSize(req.query.size);
+    let size: BillQrSize = requested;
+    let buf: Buffer;
+    try {
+      buf = await renderBillQrPng(order.upi_payload, size);
+    } catch (renderErr) {
+      if (size > BILL_FALLBACK_QR_SIZE) {
+        console.warn('[bill/qr] high-res render failed, falling back', { requested, fallback: BILL_FALLBACK_QR_SIZE, err: (renderErr as Error)?.message });
+        size = BILL_FALLBACK_QR_SIZE;
+        buf = await renderBillQrPng(order.upi_payload, size);
+      } else {
+        throw renderErr;
+      }
+    }
+
+    const safeRef = String(order.txn_ref || order.public_token).replace(/[^A-Za-z0-9_-]/g, '');
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Disposition', `attachment; filename="PayGateway-Plan-QR-${safeRef}-${size}.png"`);
+    return res.send(buf);
+  } catch (e) {
+    console.error('[bill/qr]', e);
+    return res.status(500).json({ success: false, message: 'Failed to render QR', code: 'QR_RENDER_FAILED' });
+  }
 });
 
 /* -------------------------------------------------------------------------- */

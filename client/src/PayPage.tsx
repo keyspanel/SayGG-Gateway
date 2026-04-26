@@ -214,9 +214,9 @@ function fallbackInterval(elapsedMs: number): number {
 /** Safety re-check interval when the live stream IS connected (belt + suspenders). */
 const SAFETY_POLL_MS = 45_000;
 
-async function fetchOrder(token: string, refresh = false): Promise<{ ok: boolean; status: number; data?: PayOrder; message?: string }> {
+async function fetchOrder(basePath: string, token: string, refresh = false): Promise<{ ok: boolean; status: number; data?: PayOrder; message?: string }> {
   try {
-    const res = await fetch(`/api/pay/${token}${refresh ? '/refresh' : ''}`, {
+    const res = await fetch(`${basePath}/${token}${refresh ? '/refresh' : ''}`, {
       method: refresh ? 'POST' : 'GET',
       headers: { 'Content-Type': 'application/json' },
     });
@@ -833,7 +833,20 @@ function StatusVisual({ order }: { order: PayOrder }) {
   return null;
 }
 
-export default function PayPage() {
+export interface PayPageProps {
+  /**
+   * REST base for the order/refresh/stream/qr endpoints.
+   * Merchant pages use `/api/pay`; platform billing uses `/api/billing/pay`.
+   */
+  basePath?: string;
+  /**
+   * Browser path prefix used when building the page's own shareable URL.
+   * Merchant pages live under `/pay/:token`; billing pages under `/billing/pay/:token`.
+   */
+  pagePath?: string;
+}
+
+export default function PayPage({ basePath = '/api/pay', pagePath = '/pay' }: PayPageProps = {}) {
   const { token } = useParams<{ token: string }>();
   const [order, setOrder] = useState<PayOrder | null>(null);
   const [loading, setLoading] = useState(true);
@@ -886,7 +899,7 @@ export default function PayPage() {
     if (!token) return;
     let cancelled = false;
     (async () => {
-      const r = await fetchOrder(token);
+      const r = await fetchOrder(basePath, token);
       if (cancelled) return;
       if (!r.ok || !r.data) setError(r.message || 'Unable to load payment link');
       else applySnapshot(r.data);
@@ -905,10 +918,10 @@ export default function PayPage() {
   const refreshOnce = useCallback(async () => {
     if (!token) return;
     setChecking(true);
-    const r = await fetchOrder(token, true);
+    const r = await fetchOrder(basePath, token, true);
     if (r.ok && r.data) applySnapshot(r.data);
     setChecking(false);
-  }, [token, applySnapshot]);
+  }, [token, applySnapshot, basePath]);
 
   /**
    * Realtime: subscribe to the per-order SSE stream.
@@ -973,7 +986,7 @@ export default function PayPage() {
 
     try {
       setLive('connecting');
-      es = new EventSource(`/api/pay/${token}/stream`);
+      es = new EventSource(`${basePath}/${token}/stream`);
 
       es.addEventListener('snapshot', (ev: MessageEvent) => {
         errorCount = 0;
@@ -1039,7 +1052,7 @@ export default function PayPage() {
     cardBlobRef.current = null; // new order ⇒ stale card
     qrImgRef.current = null;
     qrFetchPromiseRef.current = (async () => {
-      const res = await fetch(`/api/pay/${tk}/qr.png?size=2048`);
+      const res = await fetch(`${basePath}/${tk}/qr.png?size=2048`);
       if (!res.ok) throw new Error(`QR fetch HTTP ${res.status}`);
       const blob = await res.blob();
       const objUrl = URL.createObjectURL(blob);
@@ -1121,7 +1134,7 @@ export default function PayPage() {
       if (qrFetchPromiseRef.current) {
         qrImg = await qrFetchPromiseRef.current;
       } else {
-        const res = await fetch(`/api/pay/${order.public_token}/qr.png?size=2048`);
+        const res = await fetch(`${basePath}/${order.public_token}/qr.png?size=2048`);
         const blob = await res.blob();
         const objUrl = URL.createObjectURL(blob);
         qrImg = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -1319,7 +1332,7 @@ export default function PayPage() {
     setSharing(true);
     setShareMsg(null);
     const payUrl = typeof window !== 'undefined'
-      ? `${window.location.origin}/pay/${order.public_token}`
+      ? `${window.location.origin}${pagePath}/${order.public_token}`
       : '';
     const shareTitle = `Payment to ${order.payee_name || 'Merchant'}`;
     const shareText = `Pay ₹${order.amount.toFixed(2)} to ${order.payee_name || 'Merchant'} via UPI.${payUrl ? `\n${payUrl}` : ''}`;
