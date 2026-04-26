@@ -15,7 +15,7 @@ import BillingPayPage from './BillingPayPage';
 import BillingCheckoutDetails from './BillingCheckoutDetails';
 import BillingCheckoutConfirm from './BillingCheckoutConfirm';
 import OwnerPanel, {
-  OwnerOverview, OwnerPlans, OwnerUsers, OwnerPlanOrders, OwnerPlatformSettings,
+  OwnerOverview, OwnerPlans, OwnerUsers, OwnerPlanOrders, OwnerPlatformSettings, OwnerAccount,
 } from './OwnerPanel';
 
 function FullBoot() {
@@ -76,6 +76,7 @@ export default function App() {
             <Route path="users" element={<OwnerUsers />} />
             <Route path="plan-orders" element={<OwnerPlanOrders />} />
             <Route path="platform-settings" element={<OwnerPlatformSettings />} />
+            <Route path="account" element={<OwnerAccount />} />
           </Route>
         </Route>
 

@@ -239,11 +239,64 @@ router.get('/token', gwSession, async (req: GwSessionRequest, res: Response) => 
   apiSuccess(res, 'API token loaded', r.rows[0] || {});
 });
 
+// Change username and/or password for the signed-in user. The current
+// password is always required as a safety check, even when only the
+// username is changing, so a stolen session can't silently rename the
+// account.
+router.post('/change-credentials', gwSession, async (req: GwSessionRequest, res: Response) => {
+  const user = req.gwUser!;
+  const body = req.body || {};
+  const currentPassword = typeof body.current_password === 'string' ? body.current_password : '';
+  const newUsernameRaw = typeof body.new_username === 'string' ? body.new_username.trim() : '';
+  const newPassword = typeof body.new_password === 'string' ? body.new_password : '';
+
+  if (!currentPassword) {
+    return apiError(res, 400, 'Enter your current password.', 'CURRENT_PASSWORD_REQUIRED');
+  }
+  if (!newUsernameRaw && !newPassword) {
+    return apiError(res, 400, 'Provide a new username or new password.', 'NOTHING_TO_CHANGE');
+  }
+  if (newUsernameRaw && !USERNAME_RE.test(newUsernameRaw)) {
+    return apiError(res, 400, 'Username must be 3-32 letters, numbers or underscores.', 'INVALID_USERNAME');
+  }
+  if (newPassword && (newPassword.length < PASSWORD_MIN || newPassword.length > PASSWORD_MAX)) {
+    return apiError(res, 400, `Password must be ${PASSWORD_MIN}-${PASSWORD_MAX} characters.`, 'INVALID_PASSWORD');
+  }
+
+  const r = await pool.query('SELECT password_hash FROM gw_users WHERE id=$1', [user.id]);
+  const row = r.rows[0];
+  if (!row) return apiError(res, 404, 'Account not found.', 'NOT_FOUND');
+  const ok = await bcrypt.compare(currentPassword, row.password_hash);
+  if (!ok) return apiError(res, 401, 'Current password is incorrect.', 'BAD_PASSWORD');
+
+  // If renaming, make sure the new name isn't taken by someone else.
+  if (newUsernameRaw && newUsernameRaw.toLowerCase() !== user.username.toLowerCase()) {
+    const dup = await pool.query('SELECT 1 FROM gw_users WHERE LOWER(username)=LOWER($1) AND id<>$2 LIMIT 1', [newUsernameRaw, user.id]);
+    if (dup.rows[0]) return apiError(res, 409, 'That username is already taken.', 'USERNAME_TAKEN');
+  }
+
+  const sets: string[] = ['updated_at=NOW()'];
+  const params: any[] = [];
+  if (newUsernameRaw) { params.push(newUsernameRaw); sets.push(`username=$${params.length}`); }
+  if (newPassword) {
+    const newHash = await bcrypt.hash(newPassword, 10);
+    params.push(newHash); sets.push(`password_hash=$${params.length}`);
+  }
+  params.push(user.id);
+  await pool.query(`UPDATE gw_users SET ${sets.join(', ')} WHERE id=$${params.length}`, params);
+
+  apiSuccess(res, 'Credentials updated', {
+    username: newUsernameRaw || user.username,
+    password_changed: !!newPassword,
+  });
+});
+
 router.all('/register', methodNotAllowed(['POST']));
 router.all('/login', methodNotAllowed(['POST']));
 router.all('/me', methodNotAllowed(['GET']));
 router.all('/regenerate-token', methodNotAllowed(['POST']));
 router.all('/generate-token', methodNotAllowed(['POST']));
 router.all('/token', methodNotAllowed(['GET']));
+router.all('/change-credentials', methodNotAllowed(['POST']));
 
 export default router;

@@ -2,11 +2,18 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useGwAuth } from './AuthCtx';
 
+// Built-in owner credentials shipped with the project. Prefilled into the
+// sign-in form so the owner can land on the panel in one click. The owner
+// can change these from Owner Panel → Account afterwards; the prefill is
+// only a starting point, not a hard-coded auth.
+const DEFAULT_OWNER_USERNAME = 'SayGG';
+const DEFAULT_OWNER_PASSWORD = 'Sk.kiru@96';
+
 export default function GwLogin() {
   const { login } = useGwAuth();
   const nav = useNavigate();
-  const [u, setU] = useState('');
-  const [p, setP] = useState('');
+  const [u, setU] = useState(DEFAULT_OWNER_USERNAME);
+  const [p, setP] = useState(DEFAULT_OWNER_PASSWORD);
   const [showPwd, setShowPwd] = useState(false);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);

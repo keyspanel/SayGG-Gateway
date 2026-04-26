@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, ApiError } from './api';
+import { useGwAuth } from './AuthCtx';
 
 const SUB_NAV: { to: string; label: string; end?: boolean }[] = [
   { to: '/gateway/owner', label: 'Overview', end: true },
@@ -8,6 +9,7 @@ const SUB_NAV: { to: string; label: string; end?: boolean }[] = [
   { to: '/gateway/owner/users', label: 'Users' },
   { to: '/gateway/owner/plan-orders', label: 'Plan Orders' },
   { to: '/gateway/owner/platform-settings', label: 'Platform UPI' },
+  { to: '/gateway/owner/account', label: 'Account' },
 ];
 
 export default function OwnerPanel() {
@@ -652,4 +654,150 @@ function badgeFor(s: string) {
   if (s === 'pending') return 'warn';
   if (s === 'failed' || s === 'cancelled') return 'bad';
   return 'mute';
+}
+
+/* -------------------------------------------------------------------- */
+/* Account — change owner's own username and password                   */
+/* -------------------------------------------------------------------- */
+
+export function OwnerAccount() {
+  const { user, refresh } = useGwAuth();
+  const [newUsername, setNewUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [showNew, setShowNew] = useState(false);
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok?: string; err?: string }>({});
+
+  // Prefill the username box with the current name so the owner sees what
+  // they're changing from at a glance.
+  useEffect(() => {
+    if (user?.username) setNewUsername(user.username);
+  }, [user?.username]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMsg({});
+
+    const wantsNewName = newUsername.trim() && newUsername.trim() !== user?.username;
+    const wantsNewPwd = !!newPassword;
+
+    if (!wantsNewName && !wantsNewPwd) {
+      setMsg({ err: 'Change either the username or the password before saving.' });
+      return;
+    }
+    if (wantsNewPwd && newPassword !== confirmPassword) {
+      setMsg({ err: 'New password and confirmation do not match.' });
+      return;
+    }
+    if (!currentPassword) {
+      setMsg({ err: 'Enter your current password to confirm the change.' });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const body: any = { current_password: currentPassword };
+      if (wantsNewName) body.new_username = newUsername.trim();
+      if (wantsNewPwd) body.new_password = newPassword;
+      const r = await apiPost('/api/gateway/auth/change-credentials', body);
+      const parts: string[] = [];
+      if (wantsNewName) parts.push(`username is now "${r.username}"`);
+      if (wantsNewPwd) parts.push('password updated');
+      setMsg({ ok: 'Saved — ' + parts.join(', ') + '.' });
+      setNewPassword('');
+      setConfirmPassword('');
+      setCurrentPassword('');
+      await refresh();
+    } catch (e: any) {
+      setMsg({ err: e?.message || 'Could not save changes.' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="gw-card">
+      <div className="gw-card-h">
+        <h3>Account</h3>
+        <span className="gw-badge ok">Owner</span>
+      </div>
+      <p className="gw-muted">
+        Update the username and password used to sign in to this owner account.
+        For your safety, your current password is required to confirm any change.
+      </p>
+
+      {msg.err && <div className="gw-alert error" style={{ marginBottom: 12 }}><span>{msg.err}</span></div>}
+      {msg.ok && <div className="gw-alert ok" style={{ marginBottom: 12 }}><span>{msg.ok}</span></div>}
+
+      <form onSubmit={submit} className="gw-form">
+        <label className="gw-field">
+          <span>Username</span>
+          <input
+            value={newUsername}
+            onChange={(e) => setNewUsername(e.target.value)}
+            autoComplete="username"
+            placeholder="3-32 letters, numbers or underscores"
+            minLength={3}
+            maxLength={32}
+            required
+          />
+        </label>
+
+        <label className="gw-field">
+          <span>New password <small>leave blank to keep current</small></span>
+          <div className="gw-field-pwd">
+            <input
+              type={showNew ? 'text' : 'password'}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              autoComplete="new-password"
+              placeholder="At least 8 characters"
+              minLength={8}
+              maxLength={128}
+            />
+            <button type="button" onClick={() => setShowNew((v) => !v)} aria-label={showNew ? 'Hide password' : 'Show password'}>
+              {showNew ? 'Hide' : 'Show'}
+            </button>
+          </div>
+        </label>
+
+        <label className="gw-field">
+          <span>Confirm new password</span>
+          <input
+            type={showNew ? 'text' : 'password'}
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            autoComplete="new-password"
+            placeholder="Repeat the new password"
+            minLength={8}
+            maxLength={128}
+          />
+        </label>
+
+        <label className="gw-field">
+          <span>Current password <small>required to confirm</small></span>
+          <div className="gw-field-pwd">
+            <input
+              type={showCurrent ? 'text' : 'password'}
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              autoComplete="current-password"
+              placeholder="Your current password"
+              required
+            />
+            <button type="button" onClick={() => setShowCurrent((v) => !v)} aria-label={showCurrent ? 'Hide password' : 'Show password'}>
+              {showCurrent ? 'Hide' : 'Show'}
+            </button>
+          </div>
+        </label>
+
+        <div className="gw-actions">
+          <button className="gw-btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button>
+        </div>
+      </form>
+    </div>
+  );
 }
