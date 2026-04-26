@@ -27,17 +27,15 @@ export default function GwDashboard() {
           <p>Real-time view of your gateway.</p>
         </div>
         <div className="gw-status-pills">
-          {!user?.is_owner && (
-            <span className={`gw-pill ${sub ? 'ok' : 'warn'}`}>
-              {sub ? `Plan: ${sub.plan_name}` : 'No active plan'}
-            </span>
+          {!user?.is_owner && sub && (
+            <span className="gw-pill ok">Plan: {sub.plan_name}</span>
           )}
-          <span className={`gw-pill ${setupComplete ? 'ok' : 'warn'}`}>
-            {setupComplete ? 'Setup complete' : 'Setup required'}
-          </span>
-          <span className={`gw-pill ${hasToken ? 'ok' : 'warn'}`}>
-            {hasToken ? 'Token ready' : 'No token'}
-          </span>
+          {setupComplete && (
+            <span className="gw-pill ok">Setup complete</span>
+          )}
+          {hasToken && (
+            <span className="gw-pill ok">Token ready</span>
+          )}
         </div>
       </div>
 
