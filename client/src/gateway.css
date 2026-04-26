@@ -2940,9 +2940,36 @@ code {
 }
 .gw-confirm-rows > div > span { color: var(--gw-text-mute); }
 .gw-confirm-rows > div > b { font-weight: 700; text-align: right; word-break: break-word; }
-.gw-confirm-edit {
-  position: absolute; top: 10px; right: 12px;
+.gw-confirm-block-h.gw-confirm-block-h-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 10px;
 }
+.gw-confirm-edit-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  font-size: 12.5px; font-weight: 700;
+  text-transform: none; letter-spacing: 0;
+  color: var(--gw-primary, #4f46e5);
+  background: var(--gw-primary-soft, rgba(79, 70, 229, 0.08));
+  border: 1px solid var(--gw-primary-soft-border, rgba(79, 70, 229, 0.3));
+  border-radius: 8px;
+  cursor: pointer;
+  line-height: 1;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+.gw-confirm-edit-btn:hover:not(:disabled) {
+  background: var(--gw-primary-soft-hover, rgba(79, 70, 229, 0.14));
+  border-color: var(--gw-primary, #4f46e5);
+}
+.gw-confirm-edit-btn:focus-visible {
+  outline: 2px solid var(--gw-primary, #4f46e5);
+  outline-offset: 2px;
+}
+.gw-confirm-edit-btn:disabled {
+  opacity: 0.55; cursor: not-allowed;
+}
+.gw-confirm-edit-btn svg { flex-shrink: 0; }
 .gw-confirm-plan {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }

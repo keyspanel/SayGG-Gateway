@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { apiGet, ApiError } from './api';
 import { useGwAuth } from './AuthCtx';
 
@@ -26,10 +26,33 @@ export interface CheckoutFormState {
   postal_code: string;
 }
 
+/**
+ * Returns true when every field in the form passes the same validation
+ * the user would face on submit. Used to decide whether a returning user
+ * with a saved billing profile can skip the details step entirely.
+ */
+function isFormComplete(f: CheckoutFormState): boolean {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(f.email.trim())) return false;
+  if (!/^[\+]?[0-9\-\s\(\)]{6,40}$/.test(f.phone.trim())) return false;
+  if (f.full_name.trim().length < 2) return false;
+  if (f.city.trim().length < 2) return false;
+  if (!/^[1-9][0-9]{5}$/.test(f.postal_code.trim())) return false;
+  return true;
+}
+
 export default function BillingCheckoutDetails() {
   const { planId } = useParams<{ planId: string }>();
   const nav = useNavigate();
+  const loc = useLocation();
   const { user } = useGwAuth();
+
+  // If the user clicked "Edit details" on the confirm step, the previous
+  // form values come back to us in route state. We use that as the form's
+  // initial value AND as a signal to skip the auto-redirect — otherwise
+  // a complete profile would bounce them right back to the confirm page,
+  // making "Edit details" feel broken.
+  const incoming = loc.state as { form?: CheckoutFormState; edit?: boolean } | null;
+  const isEditing = !!(incoming?.form || incoming?.edit);
 
   const [plan, setPlan] = useState<Plan | null>(null);
   const [fee, setFee] = useState<number>(0);
@@ -37,11 +60,11 @@ export default function BillingCheckoutDetails() {
   const [loading, setLoading] = useState(true);
 
   const [form, setForm] = useState<CheckoutFormState>({
-    email: '',
-    phone: '',
-    full_name: '',
-    city: '',
-    postal_code: '',
+    email: incoming?.form?.email || '',
+    phone: incoming?.form?.phone || '',
+    full_name: incoming?.form?.full_name || '',
+    city: incoming?.form?.city || '',
+    postal_code: incoming?.form?.postal_code || '',
   });
   const [err, setErr] = useState('');
   const [errField, setErrField] = useState('');
@@ -61,23 +84,40 @@ export default function BillingCheckoutDetails() {
         const found: Plan | undefined = (plansRes.items || []).find((p: Plan) => p.id === id);
         if (!found) {
           setBootErr('That plan is no longer available.');
-        } else {
-          setPlan(found);
+          return;
         }
+        setPlan(found);
 
         const platformFee = typeof plansRes.platform_fee === 'number'
           ? plansRes.platform_fee
           : (typeof meRes.platform_fee === 'number' ? meRes.platform_fee : 0);
         setFee(platformFee);
 
+        // When the user is explicitly editing, never overwrite the form
+        // values they were just looking at on the confirm page.
+        if (isEditing) return;
+
         const profile = meRes.billing_profile || null;
-        setForm({
+        const prefilled: CheckoutFormState = {
           email: profile?.email || user?.email || '',
           phone: profile?.phone || '',
           full_name: profile?.full_name || '',
           city: profile?.city || '',
           postal_code: profile?.postal_code || '',
-        });
+        };
+        setForm(prefilled);
+
+        // Auto-fill: if the saved profile is fully valid, skip the
+        // re-entry step and send the user straight to the confirm page
+        // with everything pre-loaded. They can still tap "Edit details"
+        // on the confirm page to come back here.
+        if (isFormComplete(prefilled)) {
+          nav(`/gateway/billing/checkout/${found.id}/confirm`, {
+            replace: true,
+            state: { form: prefilled, fee: platformFee, plan: found, autofilled: true },
+          });
+          return;
+        }
       } catch (e: any) {
         if (!cancelled) setBootErr(e instanceof ApiError ? e.message : 'Could not load this plan.');
       } finally {
@@ -85,7 +125,7 @@ export default function BillingCheckoutDetails() {
       }
     })();
     return () => { cancelled = true; };
-  }, [planId, user?.email]);
+  }, [planId, user?.email, isEditing, nav]);
 
   const planPrice = plan ? (plan.discount_price ?? plan.price) : 0;
   const total = useMemo(() => Math.round((planPrice + (fee || 0)) * 100) / 100, [planPrice, fee]);

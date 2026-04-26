@@ -38,7 +38,10 @@ export default function BillingCheckoutConfirm() {
   const total = Math.round((planPrice + (fee || 0)) * 100) / 100;
 
   const goBack = () => {
-    nav(`/gateway/billing/checkout/${plan.id}`, { state: { form, fee, plan } });
+    // Pass `edit: true` so the details step knows the user is intentionally
+    // editing and shouldn't auto-skip back here even if the saved profile
+    // is technically complete.
+    nav(`/gateway/billing/checkout/${plan.id}`, { state: { form, fee, plan, edit: true } });
   };
 
   const confirm = async () => {
@@ -94,7 +97,22 @@ export default function BillingCheckoutConfirm() {
           {err && <div className="gw-alert error"><span>{err}</span></div>}
 
           <div className="gw-confirm-block">
-            <div className="gw-confirm-block-h">Billing to</div>
+            <div className="gw-confirm-block-h gw-confirm-block-h-row">
+              <span>Billing to</span>
+              <button
+                type="button"
+                className="gw-confirm-edit-btn"
+                onClick={goBack}
+                disabled={saving}
+                aria-label="Edit billing details"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                </svg>
+                Edit details
+              </button>
+            </div>
             <div className="gw-confirm-rows">
               <div><span>Name</span><b>{form.full_name}</b></div>
               <div><span>Email</span><b>{form.email}</b></div>
@@ -103,9 +121,6 @@ export default function BillingCheckoutConfirm() {
               <div><span>City</span><b>{form.city}</b></div>
               <div><span>Postal / ZIP</span><b>{form.postal_code}</b></div>
             </div>
-            <button type="button" className="gw-btn-ghost xs gw-confirm-edit" onClick={goBack} disabled={saving}>
-              Edit details
-            </button>
           </div>
 
           <div className="gw-confirm-block">
