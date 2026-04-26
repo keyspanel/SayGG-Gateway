@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { apiDelete, apiGet, apiPatch, apiPost, apiPut, ApiError } from './api';
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, ApiError, setGwToken } from './api';
 import { useGwAuth } from './AuthCtx';
 
 const SUB_NAV: { to: string; label: string; end?: boolean }[] = [
@@ -661,7 +661,7 @@ function badgeFor(s: string) {
 /* -------------------------------------------------------------------- */
 
 export function OwnerAccount() {
-  const { user, refresh } = useGwAuth();
+  const { user, refresh, logout } = useGwAuth();
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -669,6 +669,8 @@ export function OwnerAccount() {
   const [showNew, setShowNew] = useState(false);
   const [showCurrent, setShowCurrent] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [signOutBusy, setSignOutBusy] = useState(false);
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
   const [msg, setMsg] = useState<{ ok?: string; err?: string }>({});
 
   // Prefill the username box with the current name so the owner sees what
@@ -703,6 +705,11 @@ export function OwnerAccount() {
       if (wantsNewName) body.new_username = newUsername.trim();
       if (wantsNewPwd) body.new_password = newPassword;
       const r = await apiPost('/api/gateway/auth/change-credentials', body);
+      // A password change bumps the session epoch on the server, which
+      // would invalidate this very session's token. The server hands us
+      // back a fresh token in that case — install it before the next
+      // refresh() call so we don't get bounced to the login screen.
+      if (r?.token) setGwToken(r.token);
       const parts: string[] = [];
       if (wantsNewName) parts.push(`username is now "${r.username}"`);
       if (wantsNewPwd) parts.push('password updated');
@@ -715,6 +722,22 @@ export function OwnerAccount() {
       setMsg({ err: e?.message || 'Could not save changes.' });
     } finally {
       setBusy(false);
+    }
+  };
+
+  const signOutEverywhere = async () => {
+    setSignOutBusy(true);
+    setMsg({});
+    try {
+      await apiPost('/api/gateway/auth/sign-out-everywhere', {});
+      // The server just invalidated this very session too. Drop the
+      // local token and bounce back to the login screen so the user
+      // (and anyone else who was signed in) is forced to sign in again.
+      logout();
+    } catch (e: any) {
+      setMsg({ err: e?.message || 'Could not sign out other sessions.' });
+      setSignOutBusy(false);
+      setConfirmSignOut(false);
     }
   };
 
@@ -798,6 +821,48 @@ export function OwnerAccount() {
           <button className="gw-btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button>
         </div>
       </form>
+
+      <hr style={{ border: 'none', borderTop: '1px solid var(--gw-border, #2a2a33)', margin: '24px 0 16px' }} />
+
+      <div className="gw-card-h" style={{ marginBottom: 8 }}>
+        <h3 style={{ fontSize: '1rem' }}>Sign out everywhere</h3>
+      </div>
+      <p className="gw-muted" style={{ marginBottom: 12 }}>
+        Invalidate every session signed in to this account — on every browser
+        and device, including this one. Anyone using your old password will be
+        logged out and forced to sign in again.
+      </p>
+      {!confirmSignOut ? (
+        <div className="gw-actions">
+          <button
+            type="button"
+            className="gw-btn-ghost"
+            onClick={() => setConfirmSignOut(true)}
+            disabled={signOutBusy}
+          >
+            Sign out everywhere
+          </button>
+        </div>
+      ) : (
+        <div className="gw-actions" style={{ gap: 8 }}>
+          <button
+            type="button"
+            className="gw-btn-danger"
+            onClick={signOutEverywhere}
+            disabled={signOutBusy}
+          >
+            {signOutBusy ? 'Signing out…' : 'Yes, sign out all sessions'}
+          </button>
+          <button
+            type="button"
+            className="gw-btn-ghost"
+            onClick={() => setConfirmSignOut(false)}
+            disabled={signOutBusy}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
     </div>
   );
 }

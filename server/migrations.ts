@@ -17,6 +17,9 @@ CREATE INDEX IF NOT EXISTS idx_gw_users_api_token ON gw_users(api_token);
 ALTER TABLE gw_users ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'user' NOT NULL;
 ALTER TABLE gw_users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE NOT NULL;
 ALTER TABLE gw_users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
+-- Bumped to invalidate every existing JWT for this user (used by
+-- "Sign out everywhere" and as a safety reset after credential changes).
+ALTER TABLE gw_users ADD COLUMN IF NOT EXISTS session_epoch INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_gw_users_role ON gw_users(role);
 
 CREATE TABLE IF NOT EXISTS gw_settings (

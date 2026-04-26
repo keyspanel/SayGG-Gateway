@@ -14,6 +14,7 @@ export interface GwUser {
   status: string;
   role: string;
   is_active: boolean;
+  session_epoch: number;
 }
 
 export interface GwSessionRequest extends Request {
@@ -23,15 +24,23 @@ export interface GwApiRequest extends Request {
   gwUser?: GwUser;
 }
 
-export function signGwToken(user: { id: number; username: string }): string {
-  return jwt.sign({ uid: user.id, username: user.username, kind: 'gw' }, GW_JWT_SECRET, { expiresIn: '7d' });
+// The token embeds an `ep` (epoch) claim that must match the user's
+// current `session_epoch` column. Bumping that column invalidates every
+// previously-issued token in one shot — the basis of "Sign out everywhere".
+export function signGwToken(user: { id: number; username: string; session_epoch?: number }): string {
+  return jwt.sign(
+    { uid: user.id, username: user.username, kind: 'gw', ep: user.session_epoch ?? 0 },
+    GW_JWT_SECRET,
+    { expiresIn: '7d' },
+  );
 }
 
 async function loadUserById(id: number): Promise<GwUser | null> {
   const r = await pool.query(
     `SELECT id, username, email, api_token, status,
             COALESCE(role, 'user') AS role,
-            COALESCE(is_active, TRUE) AS is_active
+            COALESCE(is_active, TRUE) AS is_active,
+            COALESCE(session_epoch, 0) AS session_epoch
        FROM gw_users WHERE id=$1 LIMIT 1`,
     [id],
   );
@@ -45,11 +54,18 @@ export async function gwSession(req: GwSessionRequest, res: Response, next: Next
     return;
   }
   try {
-    const decoded = jwt.verify(header.slice(7), GW_JWT_SECRET) as { uid: number; kind: string };
+    const decoded = jwt.verify(header.slice(7), GW_JWT_SECRET) as { uid: number; kind: string; ep?: number };
     if (decoded.kind !== 'gw') throw new Error('bad token');
     const user = await loadUserById(decoded.uid);
     if (!user || user.status !== 'active' || !user.is_active) {
       apiError(res, 401, 'Account inactive', 'ACCOUNT_INACTIVE');
+      return;
+    }
+    // Token epoch must match the user's current epoch. A "Sign out
+    // everywhere" bumps the column so older tokens stop working.
+    const tokenEp = typeof decoded.ep === 'number' ? decoded.ep : 0;
+    if (tokenEp !== user.session_epoch) {
+      apiError(res, 401, 'Session was signed out', 'SESSION_REVOKED');
       return;
     }
     req.gwUser = user;

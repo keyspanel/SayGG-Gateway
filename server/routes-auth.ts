@@ -128,7 +128,7 @@ router.post('/register', registerLimiter, async (req, res) => {
     const ins = await pool.query(
       `INSERT INTO gw_users (username, email, password_hash, api_token, api_token_created_at)
        VALUES ($1,$2,$3,NULL,NULL)
-       RETURNING id, username`,
+       RETURNING id, username, COALESCE(session_epoch, 0) AS session_epoch`,
       [username, email, hash],
     );
     const user = ins.rows[0];
@@ -158,7 +158,11 @@ router.post('/login', loginLimiterIp, async (req, res) => {
 
     // Single, case-insensitive lookup against either username or email
     const r = await pool.query(
-      'SELECT id, username, password_hash, status FROM gw_users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($1) LIMIT 1',
+      `SELECT id, username, password_hash, status,
+              COALESCE(session_epoch, 0) AS session_epoch
+         FROM gw_users
+        WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($1)
+        LIMIT 1`,
       [identifierRaw],
     );
     const user = r.rows[0];
@@ -175,7 +179,7 @@ router.post('/login', loginLimiterIp, async (req, res) => {
     }
 
     clearLoginFailures(failKey);
-    const token = signGwToken({ id: user.id, username: user.username });
+    const token = signGwToken({ id: user.id, username: user.username, session_epoch: user.session_epoch });
     apiSuccess(res, 'Login successful', { token, username: user.username });
   } catch (e) {
     console.error('[gw/login]', e);
@@ -281,14 +285,43 @@ router.post('/change-credentials', gwSession, async (req: GwSessionRequest, res:
   if (newPassword) {
     const newHash = await bcrypt.hash(newPassword, 10);
     params.push(newHash); sets.push(`password_hash=$${params.length}`);
+    // Changing the password also bumps the session epoch so any other
+    // browsers signed in with the old password are kicked out.
+    sets.push('session_epoch = COALESCE(session_epoch, 0) + 1');
   }
   params.push(user.id);
-  await pool.query(`UPDATE gw_users SET ${sets.join(', ')} WHERE id=$${params.length}`, params);
+  const updated = await pool.query(
+    `UPDATE gw_users SET ${sets.join(', ')} WHERE id=$${params.length}
+     RETURNING username, COALESCE(session_epoch, 0) AS session_epoch`,
+    params,
+  );
+  const updatedRow = updated.rows[0];
+
+  // If the password changed we need to issue the caller a fresh token —
+  // their current one was just invalidated by the epoch bump.
+  let nextToken: string | undefined;
+  if (newPassword && updatedRow) {
+    nextToken = signGwToken({ id: user.id, username: updatedRow.username, session_epoch: updatedRow.session_epoch });
+  }
 
   apiSuccess(res, 'Credentials updated', {
-    username: newUsernameRaw || user.username,
+    username: updatedRow?.username || newUsernameRaw || user.username,
     password_changed: !!newPassword,
+    token: nextToken,
   });
+});
+
+// "Sign out everywhere" — bumps the user's session epoch so every JWT
+// previously issued for this account stops working immediately. The
+// caller's current token is invalidated too, so the client should clear
+// its local session right after this returns.
+router.post('/sign-out-everywhere', gwSession, async (req: GwSessionRequest, res: Response) => {
+  const user = req.gwUser!;
+  await pool.query(
+    'UPDATE gw_users SET session_epoch = COALESCE(session_epoch, 0) + 1, updated_at=NOW() WHERE id=$1',
+    [user.id],
+  );
+  apiSuccess(res, 'Signed out of all sessions', {});
 });
 
 router.all('/register', methodNotAllowed(['POST']));
@@ -298,5 +331,6 @@ router.all('/regenerate-token', methodNotAllowed(['POST']));
 router.all('/generate-token', methodNotAllowed(['POST']));
 router.all('/token', methodNotAllowed(['GET']));
 router.all('/change-credentials', methodNotAllowed(['POST']));
+router.all('/sign-out-everywhere', methodNotAllowed(['POST']));
 
 export default router;
