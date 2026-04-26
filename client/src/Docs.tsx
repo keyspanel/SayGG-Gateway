@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { gwApiRaw, gwGet, gwPost } from './api';
+import React, { useEffect, useState, useCallback } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { gwApiRaw, gwGet, gwPost, apiGet } from './api';
 import { useGwAuth } from './AuthCtx';
 
 /* ============================================================
@@ -54,14 +54,64 @@ function pretty(v: any) {
 }
 
 /* ============================================================
-   Plan badge helper
+   Lock icon
    ============================================================ */
 
-function PlanBadge({ user }: { user: any }) {
+function LockSvg() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2"/>
+      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </svg>
+  );
+}
+
+/* ============================================================
+   LockedPreview — blur + overlay when locked
+   ============================================================ */
+
+interface LockedPreviewProps {
+  locked: boolean;
+  reason: string;
+  subtitle?: string;
+  ctaLabel: string;
+  onCta: () => void;
+  children: React.ReactNode;
+}
+
+function LockedPreview({ locked, reason, subtitle, ctaLabel, onCta, children }: LockedPreviewProps) {
+  if (!locked) return <>{children}</>;
+  return (
+    <div className="docs-locked-preview">
+      <div className="docs-locked-content" aria-hidden="true">
+        {children}
+      </div>
+      <div className="docs-lock-overlay" role="region" aria-label="Locked content">
+        <div className="docs-lock-card">
+          <div className="docs-lock-icon"><LockSvg /></div>
+          <p className="docs-lock-title">{reason}</p>
+          {subtitle && <p className="docs-lock-sub">{subtitle}</p>}
+          <button className="gw-btn-primary" onClick={onCta} style={{ marginTop: 4, width: '100%', justifyContent: 'center' }}>
+            {ctaLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   Plan badge
+   ============================================================ */
+
+function PlanBadge({ user, isExpired }: { user: any; isExpired: boolean }) {
   if (!user) return null;
   if (user.is_owner) return <span className="gw-badge mute">Owner</span>;
   const sub = user.active_subscription;
-  if (!sub) return null;
+  if (!sub) {
+    if (isExpired) return <span className="gw-badge expired-plan">Expired</span>;
+    return <span className="gw-badge warn-plan">No active plan</span>;
+  }
   const label = sub.method_access === 'server' ? 'Server API'
               : sub.method_access === 'hosted' ? 'Hosted Page'
               : 'Master';
@@ -70,38 +120,48 @@ function PlanBadge({ user }: { user: any }) {
 }
 
 /* ============================================================
-   Tabs
+   Page
    ============================================================ */
 
 type TabKey = 'test' | 'server' | 'hosted' | 'setup';
 
-/* ============================================================
-   Page
-   ============================================================ */
+const ALL_TABS: { key: TabKey; label: string }[] = [
+  { key: 'test',   label: 'Test' },
+  { key: 'server', label: 'Server' },
+  { key: 'hosted', label: 'Hosted Page' },
+  { key: 'setup',  label: 'Setup' },
+];
 
 export default function GwDocs() {
   const { refresh, user } = useGwAuth();
-  const access = user?.access || { server: false, hosted: false, master: false };
+  const navigate = useNavigate();
+
+  const sub = user?.active_subscription;
   const isOwner = !!user?.is_owner;
-  const canServer = isOwner || access.server || access.master;
-  const canHosted = isOwner || access.hosted || access.master;
-  const isMasterOrOwner = isOwner || access.master;
+  const canServer = isOwner || !!(sub && (sub.method_access === 'server' || sub.method_access === 'master'));
+  const canHosted = isOwner || !!(sub && (sub.method_access === 'hosted' || sub.method_access === 'master'));
+  const isMasterOrOwner = isOwner || !!(sub && sub.method_access === 'master');
+  const hasPlan = isOwner || !!sub;
 
-  // Dynamic tab list based on plan
-  const allTabs: { key: TabKey; label: string }[] = [
-    { key: 'test',   label: 'Test' },
-    ...(canServer ? [{ key: 'server' as TabKey, label: 'Server' }] : []),
-    ...(canHosted ? [{ key: 'hosted' as TabKey, label: 'Hosted Page' }] : []),
-    { key: 'setup',  label: 'Setup' },
-  ];
+  const [isExpired, setIsExpired] = useState(false);
 
-  const defaultTab: TabKey = 'test';
-  const [tab, setTab] = useState<TabKey>(defaultTab);
+  useEffect(() => {
+    if (!hasPlan && !isOwner) {
+      apiGet('/api/billing/me').then((m: any) => {
+        const history: any[] = m.history || [];
+        setIsExpired(history.length > 0);
+      }).catch(() => {});
+    }
+  }, [hasPlan, isOwner]);
 
-  // Ensure active tab is always valid
-  const validTab = allTabs.find(t => t.key === tab) ? tab : (allTabs[0]?.key || 'test');
+  const goToBilling = useCallback(() => navigate('/gateway/billing'), [navigate]);
 
-  // ---- Token state ----
+  const serverCtaLabel = isExpired ? 'Renew Plan' : !hasPlan ? 'View Plans' : 'Upgrade Plan';
+  const hostedCtaLabel = isExpired ? 'Renew Plan' : !hasPlan ? 'View Plans' : 'Upgrade Plan';
+  const testCtaLabel   = isExpired ? 'Renew Plan' : 'View Plans';
+
+  const [tab, setTab] = useState<TabKey>('test');
+
   const [token, setToken] = useState('');
   const [created, setCreated] = useState<string | null>(null);
   const [show, setShow] = useState(false);
@@ -118,9 +178,9 @@ export default function GwDocs() {
         gwGet('/auth/token').catch(() => ({})),
         gwGet('/settings/').catch(() => ({})),
       ]);
-      setToken(t?.api_token || '');
-      setCreated(t?.api_token_created_at || null);
-      setSettingsActive(!!s?.is_active);
+      setToken((t as any)?.api_token || '');
+      setCreated((t as any)?.api_token_created_at || null);
+      setSettingsActive(!!(s as any)?.is_active);
     } finally {
       setSettingsLoaded(true);
     }
@@ -162,7 +222,7 @@ export default function GwDocs() {
           <h2>API Reference</h2>
           <p>Token, endpoints and integration guide.</p>
         </div>
-        <PlanBadge user={user} />
+        <PlanBadge user={user} isExpired={isExpired} />
       </div>
 
       <ApiTokenCard
@@ -175,11 +235,14 @@ export default function GwDocs() {
         settingsLoaded={settingsLoaded}
         tokenMsg={tokenMsg}
         tokenCopied={tokenCopied}
+        hasPlan={hasPlan}
+        isOwner={isOwner}
         onToggleShow={() => setShow(!show)}
         onCopy={copyToken}
         onGenerate={generate}
         onAskRotate={() => setConfirmRegen(true)}
         onCancelRotate={() => setConfirmRegen(false)}
+        onGoToBilling={goToBilling}
       />
 
       <div className="gw-card" style={{ padding: 10 }}>
@@ -187,12 +250,12 @@ export default function GwDocs() {
       </div>
 
       <div className="gw-tabs" role="tablist">
-        {allTabs.map((t) => (
+        {ALL_TABS.map((t) => (
           <button
             key={t.key}
             role="tab"
-            aria-selected={validTab === t.key}
-            className={`gw-tab${validTab === t.key ? ' active' : ''}`}
+            aria-selected={tab === t.key}
+            className={`gw-tab${tab === t.key ? ' active' : ''}`}
             onClick={() => setTab(t.key)}
           >
             {t.label}
@@ -200,10 +263,48 @@ export default function GwDocs() {
         ))}
       </div>
 
-      {validTab === 'test'   && <TestTab   token={token} baseUrl={baseUrl} settingsActive={settingsActive} canServer={canServer} canHosted={canHosted} isMasterOrOwner={isMasterOrOwner} />}
-      {validTab === 'server' && <ServerTab  baseUrl={baseUrl} token={token} />}
-      {validTab === 'hosted' && <HostedPageTab />}
-      {validTab === 'setup'  && <SetupTab   baseUrl={baseUrl} canServer={canServer} canHosted={canHosted} isMasterOrOwner={isMasterOrOwner} />}
+      {tab === 'test' && (
+        <TestTab
+          token={token}
+          baseUrl={baseUrl}
+          settingsActive={settingsActive}
+          canServer={canServer}
+          canHosted={canHosted}
+          isMasterOrOwner={isMasterOrOwner}
+          hasPlan={hasPlan}
+          isExpired={isExpired}
+          ctaLabel={testCtaLabel}
+          onGoToBilling={goToBilling}
+        />
+      )}
+      {tab === 'server' && (
+        <ServerTab
+          baseUrl={baseUrl}
+          token={token}
+          canServer={canServer}
+          ctaLabel={serverCtaLabel}
+          onGoToBilling={goToBilling}
+        />
+      )}
+      {tab === 'hosted' && (
+        <HostedPageTab
+          canHosted={canHosted}
+          ctaLabel={hostedCtaLabel}
+          onGoToBilling={goToBilling}
+        />
+      )}
+      {tab === 'setup' && (
+        <SetupTab
+          baseUrl={baseUrl}
+          canServer={canServer}
+          canHosted={canHosted}
+          isMasterOrOwner={isMasterOrOwner}
+          hasPlan={hasPlan}
+          serverCtaLabel={serverCtaLabel}
+          hostedCtaLabel={hostedCtaLabel}
+          onGoToBilling={goToBilling}
+        />
+      )}
     </div>
   );
 }
@@ -222,16 +323,20 @@ function ApiTokenCard(props: {
   settingsLoaded: boolean;
   tokenMsg: { ok?: string; err?: string };
   tokenCopied: boolean;
+  hasPlan: boolean;
+  isOwner: boolean;
   onToggleShow: () => void;
   onCopy: () => void;
   onGenerate: () => void;
   onAskRotate: () => void;
   onCancelRotate: () => void;
+  onGoToBilling: () => void;
 }) {
   const {
     token, created, show, busy, confirmRegen,
     settingsActive, settingsLoaded, tokenMsg, tokenCopied,
-    onToggleShow, onCopy, onGenerate, onAskRotate, onCancelRotate,
+    hasPlan, isOwner,
+    onToggleShow, onCopy, onGenerate, onAskRotate, onCancelRotate, onGoToBilling,
   } = props;
 
   const masked = token ? token.slice(0, 5) + '••••••••' + token.slice(-4) : '';
@@ -251,7 +356,18 @@ function ApiTokenCard(props: {
 
       {!settingsLoaded ? (
         <div className="gw-loading">Loading…</div>
+      ) : !isOwner && !hasPlan ? (
+        /* ── No active plan ── */
+        <div className="gw-token-empty">
+          <div style={{ marginBottom: 10, color: 'var(--gw-text-mute)' }}>
+            <LockSvg />
+          </div>
+          <h4>API Token locked</h4>
+          <p>Choose a plan to create API tokens and start accepting payments.</p>
+          <button className="gw-btn-primary" onClick={onGoToBilling}>View Plans</button>
+        </div>
       ) : !settingsActive && !token ? (
+        /* ── Has plan but UPI not set up ── */
         <>
           <div className="gw-alert warn">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -264,6 +380,7 @@ function ApiTokenCard(props: {
           </div>
         </>
       ) : !token ? (
+        /* ── Has plan, UPI ready, no token yet ── */
         <>
           {tokenMsg.err && <div className="gw-alert error"><span>{tokenMsg.err}</span></div>}
           <div className="gw-token-empty">
@@ -275,6 +392,7 @@ function ApiTokenCard(props: {
           </div>
         </>
       ) : (
+        /* ── Token exists ── */
         <div className="gw-token-card">
           {tokenMsg.ok && <div className="gw-alert ok"><span>{tokenMsg.ok}</span></div>}
           {tokenMsg.err && <div className="gw-alert error"><span>{tokenMsg.err}</span></div>}
@@ -321,10 +439,14 @@ function ApiTokenCard(props: {
    TEST TAB
    ============================================================ */
 
-function TestTab({ token, baseUrl, settingsActive, canServer, canHosted, isMasterOrOwner }: {
+function TestTab({ token, baseUrl, settingsActive, canServer, canHosted, isMasterOrOwner, hasPlan, isExpired, ctaLabel, onGoToBilling }: {
   token: string; baseUrl: string; settingsActive: boolean;
   canServer: boolean; canHosted: boolean; isMasterOrOwner: boolean;
+  hasPlan: boolean; isExpired: boolean; ctaLabel: string; onGoToBilling: () => void;
 }) {
+  const expiredText = isExpired ? 'Plan expired' : 'Plan required';
+  const expiredSub  = isExpired ? 'Renew your plan to continue testing.' : 'Choose a plan to test live payment orders.';
+
   return (
     <>
       <div className="gw-card">
@@ -345,7 +467,18 @@ function TestTab({ token, baseUrl, settingsActive, canServer, canHosted, isMaste
         </ol>
       </div>
 
-      {token && settingsActive ? (
+      {/* Sandbox — locked if no plan */}
+      {!hasPlan ? (
+        <LockedPreview
+          locked={true}
+          reason={expiredText}
+          subtitle={expiredSub}
+          ctaLabel={ctaLabel}
+          onCta={onGoToBilling}
+        >
+          <LockedSandboxPreview />
+        </LockedPreview>
+      ) : token && settingsActive ? (
         <TestConsole apiToken={token} baseUrl={baseUrl} canServer={canServer} canHosted={canHosted} isMasterOrOwner={isMasterOrOwner} />
       ) : (
         <div className="gw-card">
@@ -381,11 +514,40 @@ function TestTab({ token, baseUrl, settingsActive, canServer, canHosted, isMaste
   );
 }
 
+/* Static preview card shown blurred in the locked sandbox */
+function LockedSandboxPreview() {
+  return (
+    <div className="gw-card">
+      <div className="gw-card-h">
+        <h3>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+          Sandbox
+        </h3>
+        <span className="gw-badge ok">Live</span>
+      </div>
+      <p className="gw-muted" style={{ marginTop: -2 }}>
+        Real API calls. Test orders appear in Transactions. Use ₹1.00 for safe testing.
+      </p>
+      <div className="gw-form" style={{ gap: 10, marginTop: 8 }}>
+        <label className="gw-field"><span>Mode</span><div style={{ height: 36, background: 'var(--gw-bg-2)', borderRadius: 8 }} /></label>
+        <label className="gw-field"><span>Amount (INR)</span><div style={{ height: 36, background: 'var(--gw-bg-2)', borderRadius: 8 }} /></label>
+        <label className="gw-field"><span>client_order_id</span><div style={{ height: 36, background: 'var(--gw-bg-2)', borderRadius: 8 }} /></label>
+        <label className="gw-field"><span>callback_url</span><div style={{ height: 36, background: 'var(--gw-bg-2)', borderRadius: 8 }} /></label>
+      </div>
+      <div className="gw-actions" style={{ marginTop: 8 }}>
+        <div style={{ height: 36, width: 80, background: 'var(--gw-primary)', opacity: 0.4, borderRadius: 8 }} />
+      </div>
+    </div>
+  );
+}
+
 /* ============================================================
    SERVER TAB
    ============================================================ */
 
-function ServerTab({ baseUrl, token }: { baseUrl: string; token: string }) {
+function ServerTab({ baseUrl, token, canServer, ctaLabel, onGoToBilling }: {
+  baseUrl: string; token: string; canServer: boolean; ctaLabel: string; onGoToBilling: () => void;
+}) {
   const createResp = `{
   "success": true,
   "data": {
@@ -416,7 +578,7 @@ function ServerTab({ baseUrl, token }: { baseUrl: string; token: string }) {
   }
 }`;
 
-  return (
+  const content = (
     <>
       <div className="gw-card">
         <div className="gw-card-h">
@@ -431,7 +593,6 @@ function ServerTab({ baseUrl, token }: { baseUrl: string; token: string }) {
         </p>
       </div>
 
-      {/* Create order */}
       <div className="gw-card">
         <div className="gw-card-h">
           <h3>Create order</h3>
@@ -462,7 +623,6 @@ function ServerTab({ baseUrl, token }: { baseUrl: string; token: string }) {
         <Code>{createResp}</Code>
       </div>
 
-      {/* Check order */}
       <div className="gw-card">
         <div className="gw-card-h">
           <h3>Check order</h3>
@@ -486,7 +646,6 @@ function ServerTab({ baseUrl, token }: { baseUrl: string; token: string }) {
         <Code>{checkResp}</Code>
       </div>
 
-      {/* Webhooks */}
       <div className="gw-card">
         <div className="gw-card-h">
           <h3>
@@ -500,13 +659,27 @@ function ServerTab({ baseUrl, token }: { baseUrl: string; token: string }) {
       </div>
     </>
   );
+
+  return (
+    <LockedPreview
+      locked={!canServer}
+      reason="Server API locked"
+      subtitle="Activate the Server API or Master plan to use Method 1."
+      ctaLabel={ctaLabel}
+      onCta={onGoToBilling}
+    >
+      {content}
+    </LockedPreview>
+  );
 }
 
 /* ============================================================
    HOSTED PAGE TAB
    ============================================================ */
 
-function HostedPageTab() {
+function HostedPageTab({ canHosted, ctaLabel, onGoToBilling }: {
+  canHosted: boolean; ctaLabel: string; onGoToBilling: () => void;
+}) {
   const createResp = `{
   "success": true,
   "data": {
@@ -525,7 +698,7 @@ function HostedPageTab() {
   }
 }`;
 
-  return (
+  const content = (
     <>
       <div className="gw-card">
         <div className="gw-card-h">
@@ -540,7 +713,6 @@ function HostedPageTab() {
         </p>
       </div>
 
-      {/* Create order */}
       <div className="gw-card">
         <div className="gw-card-h">
           <h3>Create order</h3>
@@ -570,7 +742,6 @@ function HostedPageTab() {
         <Code>{createResp}</Code>
       </div>
 
-      {/* How it flows */}
       <div className="gw-card">
         <div className="gw-card-h">
           <h3>
@@ -586,11 +757,10 @@ function HostedPageTab() {
           <li>Page polls for payment status automatically.</li>
           <li>On <code>paid</code>, page shows success and redirects to <code>redirect_url</code> after 5 seconds.</li>
           <li>On failure or expiry, page redirects to <code>cancel_url</code>.</li>
-          <li>Your server still confirms via webhook or <code>check-order</code> before delivering the product.</li>
+          <li>Your server confirms via webhook or <code>check-order</code> before delivering the product.</li>
         </ol>
       </div>
 
-      {/* Response fields */}
       <div className="gw-card">
         <div className="gw-card-h">
           <h3>
@@ -636,7 +806,6 @@ function HostedPageTab() {
         </details>
       </div>
 
-      {/* Webhook */}
       <div className="gw-card">
         <div className="gw-card-h">
           <h3>Webhook (callback_url)</h3>
@@ -647,64 +816,95 @@ function HostedPageTab() {
       </div>
     </>
   );
+
+  return (
+    <LockedPreview
+      locked={!canHosted}
+      reason="Hosted Pay Page locked"
+      subtitle="Activate the Hosted Pay Page or Master plan to use Method 2."
+      ctaLabel={ctaLabel}
+      onCta={onGoToBilling}
+    >
+      {content}
+    </LockedPreview>
+  );
 }
 
 /* ============================================================
    SETUP TAB
    ============================================================ */
 
-function SetupTab({ baseUrl, canServer, canHosted, isMasterOrOwner }: {
+function SetupTab({ baseUrl, canServer, canHosted, isMasterOrOwner, hasPlan, serverCtaLabel, hostedCtaLabel, onGoToBilling }: {
   baseUrl: string; canServer: boolean; canHosted: boolean; isMasterOrOwner: boolean;
+  hasPlan: boolean; serverCtaLabel: string; hostedCtaLabel: string; onGoToBilling: () => void;
 }) {
+  const serverSetup = (
+    <div className="gw-card">
+      <div className="gw-card-h">
+        <h3>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          Method 1 — Server API setup
+        </h3>
+        {canServer && <span className="gw-badge mute">Your plan</span>}
+      </div>
+      <p className="gw-muted" style={{ marginTop: -2 }}>
+        Your backend creates the order, shows the UPI link or QR in your own UI, and confirms payment status. You control the full checkout experience.
+      </p>
+      <ol className="gw-steps">
+        <li>Save UPI settings in the dashboard.</li>
+        <li>Create an API token on this page.</li>
+        <li>Store the token in a backend environment variable (never in the frontend).</li>
+        <li>Backend calls <code>POST /api/gateway/create-order</code> with <code>mode: "server"</code>.</li>
+        <li>Use <code>payment_link</code> or <code>upi_payload</code> to display QR or UPI deep-link in your UI.</li>
+        <li>Backend polls <code>POST /api/gateway/check-order</code> or listens to the <code>callback_url</code> webhook.</li>
+        <li>Mark the user's order paid only after gateway status is <code>"paid"</code>.</li>
+      </ol>
+    </div>
+  );
+
+  const hostedSetup = (
+    <div className="gw-card">
+      <div className="gw-card-h">
+        <h3>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          Method 2 — Hosted payment page setup
+        </h3>
+        {canHosted && !canServer && <span className="gw-badge mute">Your plan</span>}
+      </div>
+      <p className="gw-muted" style={{ marginTop: -2 }}>
+        Your backend creates the order and redirects the customer to the hosted checkout. We handle the QR display, UPI links, and status polling.
+      </p>
+      <ol className="gw-steps">
+        <li>Backend calls <code>POST /api/gateway/create-order</code> with <code>mode: "hosted"</code>.</li>
+        <li>Include <code>redirect_url</code> and <code>cancel_url</code> to control the post-payment redirect.</li>
+        <li>Redirect the customer to <code>payment_page_url</code>.</li>
+        <li>Customer pays on the hosted page; we redirect them after a final status.</li>
+        <li>Your server verifies via webhook or <code>check-order</code> before delivering the product.</li>
+      </ol>
+    </div>
+  );
+
   return (
     <>
-      {/* Method 1 — only shown to server or master/owner users */}
-      {canServer && (
-        <div className="gw-card">
-          <div className="gw-card-h">
-            <h3>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-              Method 1 — Server API setup
-            </h3>
-            <span className="gw-badge mute">Your plan</span>
-          </div>
-          <p className="gw-muted" style={{ marginTop: -2 }}>
-            Your backend creates the order, shows the UPI link or QR in your own UI, and confirms payment status. You control the full checkout experience.
-          </p>
-          <ol className="gw-steps">
-            <li>Save UPI settings in the dashboard.</li>
-            <li>Create an API token on this page.</li>
-            <li>Store the token in a backend environment variable (never in the frontend).</li>
-            <li>Backend calls <code>POST /api/gateway/create-order</code> with <code>mode: "server"</code>.</li>
-            <li>Use <code>payment_link</code> or <code>upi_payload</code> to display QR or UPI deep-link in your UI.</li>
-            <li>Backend polls <code>POST /api/gateway/check-order</code> or listens to the <code>callback_url</code> webhook.</li>
-            <li>Mark the user's order paid only after gateway status is <code>"paid"</code>.</li>
-          </ol>
-        </div>
-      )}
+      <LockedPreview
+        locked={!canServer}
+        reason={!hasPlan ? 'Choose a plan to unlock setup guide.' : 'Server API setup locked.'}
+        subtitle={!hasPlan ? undefined : 'Upgrade to Master to unlock both methods.'}
+        ctaLabel={serverCtaLabel}
+        onCta={onGoToBilling}
+      >
+        {serverSetup}
+      </LockedPreview>
 
-      {/* Method 2 — only shown to hosted or master/owner users */}
-      {canHosted && (
-        <div className="gw-card">
-          <div className="gw-card-h">
-            <h3>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-              Method 2 — Hosted payment page setup
-            </h3>
-            {!canServer && <span className="gw-badge mute">Your plan</span>}
-          </div>
-          <p className="gw-muted" style={{ marginTop: -2 }}>
-            Your backend creates the order and redirects the customer to the hosted checkout. We handle the QR display, UPI links, and status polling.
-          </p>
-          <ol className="gw-steps">
-            <li>Backend calls <code>POST /api/gateway/create-order</code> with <code>mode: "hosted"</code>.</li>
-            <li>Include <code>redirect_url</code> and <code>cancel_url</code> to control the post-payment redirect.</li>
-            <li>Redirect the customer to <code>payment_page_url</code>.</li>
-            <li>Customer pays on the hosted page; we redirect them after a final status.</li>
-            <li>Your server verifies via webhook or <code>check-order</code> before delivering the product.</li>
-          </ol>
-        </div>
-      )}
+      <LockedPreview
+        locked={!canHosted}
+        reason={!hasPlan ? 'Choose a plan to unlock setup guide.' : 'Hosted Pay Page setup locked.'}
+        subtitle={!hasPlan ? undefined : 'Upgrade to Master to unlock both methods.'}
+        ctaLabel={hostedCtaLabel}
+        onCta={onGoToBilling}
+      >
+        {hostedSetup}
+      </LockedPreview>
 
       <div className="gw-card">
         <div className="gw-card-h">
@@ -732,7 +932,6 @@ function SetupTab({ baseUrl, canServer, canHosted, isMasterOrOwner }: {
 function TestConsole({ apiToken, baseUrl, canServer, canHosted, isMasterOrOwner }: {
   apiToken: string; baseUrl: string; canServer: boolean; canHosted: boolean; isMasterOrOwner: boolean;
 }) {
-  // Determine the fixed or selectable mode
   const modeFixed = !isMasterOrOwner;
   const defaultMode: 'hosted' | 'server' = canHosted ? 'hosted' : 'server';
 
@@ -754,7 +953,6 @@ function TestConsole({ apiToken, baseUrl, canServer, canHosted, isMasterOrOwner 
   const [checkBusy, setCheckBusy] = useState(false);
   const [checkOut, setCheckOut] = useState<{ status: number; ok: boolean; body: any } | null>(null);
 
-  // When mode changes, clear redirect/cancel fields that aren't applicable
   const showHostedFields = mode === 'hosted';
 
   const runCreate = async () => {
@@ -817,7 +1015,6 @@ function TestConsole({ apiToken, baseUrl, canServer, canHosted, isMasterOrOwner 
         <summary>Create test order</summary>
         <div className="gw-acc-body">
           <div className="gw-form">
-            {/* Mode selector — fixed for plan-specific users, selectable for master/owner */}
             <label className="gw-field">
               <span>Mode <span className="gw-required">*</span></span>
               {modeFixed ? (
@@ -861,7 +1058,6 @@ function TestConsole({ apiToken, baseUrl, canServer, canHosted, isMasterOrOwner 
               <input value={callbackUrl} onChange={(e) => setCallbackUrl(e.target.value)} placeholder="https://your-site.com/payment/webhook" inputMode="url" autoCapitalize="off" />
             </label>
 
-            {/* Hosted-only fields */}
             {showHostedFields && (
               <>
                 <label className="gw-field">
@@ -899,7 +1095,6 @@ function TestConsole({ apiToken, baseUrl, canServer, canHosted, isMasterOrOwner 
                 )}
               </div>
 
-              {/* Hosted page buttons — only for hosted mode */}
               {createOut.ok && mode === 'hosted' && createOut.body?.data?.payment_page_url && (
                 <div className="gw-actions" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
                   <a className="gw-btn-primary sm" href={createOut.body.data.payment_page_url} target="_blank" rel="noreferrer noopener">
@@ -967,3 +1162,5 @@ function TestConsole({ apiToken, baseUrl, canServer, canHosted, isMasterOrOwner 
     </div>
   );
 }
+
+export { };

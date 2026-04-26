@@ -2750,3 +2750,111 @@ code {
   background: var(--gw-bg, #f8fafc);
 }
 :root[data-theme="dark"] .gw-fullboot { background: #0b1220; }
+
+/* ============================================================
+   Locked Preview — docs access control
+   ============================================================ */
+
+.docs-locked-preview {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--gw-radius);
+}
+
+.docs-locked-content {
+  filter: blur(4px);
+  opacity: 0.65;
+  pointer-events: none;
+  user-select: none;
+}
+
+.docs-lock-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 32px 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.88) 60%);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  z-index: 5;
+}
+
+:root[data-theme="dark"] .docs-lock-overlay {
+  background: linear-gradient(180deg, rgba(11,11,15,0.55) 0%, rgba(11,11,15,0.88) 60%);
+}
+
+.docs-lock-card {
+  position: sticky;
+  top: 80px;
+  width: 100%;
+  max-width: 340px;
+  text-align: center;
+  border-radius: 18px;
+  padding: 24px 20px;
+  background: rgba(255,255,255,0.95);
+  border: 1px solid rgba(99,102,241,0.18);
+  box-shadow: 0 18px 45px rgba(15,23,42,0.12), 0 2px 8px rgba(15,23,42,0.06);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+:root[data-theme="dark"] .docs-lock-card {
+  background: rgba(19,19,24,0.97);
+  border-color: rgba(129,140,248,0.2);
+  box-shadow: 0 18px 45px rgba(0,0,0,0.4);
+}
+
+.docs-lock-icon {
+  width: 44px; height: 44px; border-radius: 999px;
+  background: var(--gw-primary-soft);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--gw-primary);
+  flex-shrink: 0;
+}
+
+.docs-lock-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--gw-text);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.docs-lock-sub {
+  font-size: 12.5px;
+  color: var(--gw-text-mute);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Tab scroll on mobile */
+.gw-tabs {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  white-space: nowrap;
+  display: flex;
+}
+.gw-tabs::-webkit-scrollbar { display: none; }
+
+.gw-tab {
+  flex-shrink: 0;
+}
+
+/* Plan badge warn state (no plan) */
+.gw-badge.warn-plan {
+  background: var(--gw-warn-bg);
+  color: var(--gw-warn);
+  border: 1px solid rgba(180, 83, 9, 0.18);
+}
+
+/* Plan badge expired state */
+.gw-badge.expired-plan {
+  background: var(--gw-bad-bg);
+  color: var(--gw-bad);
+  border: 1px solid rgba(185, 28, 28, 0.18);
+}
