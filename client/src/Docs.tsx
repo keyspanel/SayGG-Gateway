@@ -436,6 +436,68 @@ function ApiTokenCard(props: {
 }
 
 /* ============================================================
+   Shared overview helpers — used across tabs
+   ============================================================ */
+
+function CheckIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+  );
+}
+
+interface MethodFeature { title: string; sub: string; }
+
+function MethodOverviewCard({ icon, title, methodLabel, description, features, bestFor }: {
+  icon: React.ReactNode; title: string; methodLabel: string;
+  description: string; features: MethodFeature[]; bestFor: string;
+}) {
+  return (
+    <div className="gw-card">
+      <div className="gw-card-h">
+        <h3>{icon}{title}</h3>
+        <span className="gw-badge mute">{methodLabel}</span>
+      </div>
+      <p className="gw-muted" style={{ marginTop: -2 }}>{description}</p>
+      <div className="gw-feat-grid">
+        {features.map((f, i) => (
+          <div key={i} className="gw-feat">
+            <span className="gw-feat-icon"><CheckIcon /></span>
+            <div className="gw-feat-text">
+              <strong>{f.title}</strong>
+              <span>{f.sub}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="gw-best-for">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        Best for: {bestFor}
+      </div>
+    </div>
+  );
+}
+
+function StatusLegendCard() {
+  return (
+    <div className="gw-card">
+      <div className="gw-card-h">
+        <h3>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Status meaning
+        </h3>
+      </div>
+      <ul className="gw-list">
+        <li><span className="gw-badge warn" style={{ minWidth: 78, justifyContent: 'center' }}>pending</span> waiting for payment</li>
+        <li><span className="gw-badge ok"   style={{ minWidth: 78, justifyContent: 'center' }}>paid</span> verified payment</li>
+        <li><span className="gw-badge bad"  style={{ minWidth: 78, justifyContent: 'center' }}>failed</span> payment failed or mismatch</li>
+        <li><span className="gw-badge mute" style={{ minWidth: 78, justifyContent: 'center' }}>expired</span> order time ended</li>
+        <li><span className="gw-badge bad"  style={{ minWidth: 78, justifyContent: 'center' }}>cancelled</span> cancelled manually</li>
+      </ul>
+    </div>
+  );
+}
+
+/* ============================================================
    TEST TAB
    ============================================================ */
 
@@ -495,21 +557,7 @@ function TestTab({ token, baseUrl, settingsActive, canServer, canHosted, isMaste
         </div>
       )}
 
-      <div className="gw-card">
-        <div className="gw-card-h">
-          <h3>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            Status meaning
-          </h3>
-        </div>
-        <ul className="gw-list">
-          <li><span className="gw-badge warn" style={{ minWidth: 78, justifyContent: 'center' }}>pending</span> waiting for payment</li>
-          <li><span className="gw-badge ok"   style={{ minWidth: 78, justifyContent: 'center' }}>paid</span> verified payment</li>
-          <li><span className="gw-badge bad"  style={{ minWidth: 78, justifyContent: 'center' }}>failed</span> payment failed or mismatch</li>
-          <li><span className="gw-badge mute" style={{ minWidth: 78, justifyContent: 'center' }}>expired</span> order time ended</li>
-          <li><span className="gw-badge bad"  style={{ minWidth: 78, justifyContent: 'center' }}>cancelled</span> cancelled manually</li>
-        </ul>
-      </div>
+      <StatusLegendCard />
     </>
   );
 }
@@ -578,21 +626,24 @@ function ServerTab({ baseUrl, token, canServer, ctaLabel, onGoToBilling }: {
   }
 }`;
 
-  const content = (
-    <>
-      <div className="gw-card">
-        <div className="gw-card-h">
-          <h3>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-            Server API
-          </h3>
-          <span className="gw-badge mute">Method 1</span>
-        </div>
-        <p className="gw-muted" style={{ marginTop: -2 }}>
-          Your backend creates orders, receives the UPI payload, shows QR or UPI links in your own UI, and confirms payment status. The API token stays private on your server.
-        </p>
-      </div>
+  const overview = (
+    <MethodOverviewCard
+      icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>}
+      title="Server API"
+      methodLabel="Method 1"
+      description="Your backend creates orders, receives the UPI payload, shows QR or UPI links inside your own UI, and confirms payment status. The API token stays private on your server."
+      features={[
+        { title: 'Full UI control',     sub: 'Render QR / UPI links in your own checkout' },
+        { title: 'Token stays private', sub: 'API token lives only on your backend' },
+        { title: 'Webhook + polling',   sub: 'Confirm via callback_url or check-order' },
+        { title: 'Custom branding',     sub: 'No external page, no redirect needed' },
+      ]}
+      bestFor="SaaS dashboards, custom checkouts, mobile apps"
+    />
+  );
 
+  const endpoints = (
+    <>
       <div className="gw-card">
         <div className="gw-card-h">
           <h3>Create order</h3>
@@ -661,15 +712,19 @@ function ServerTab({ baseUrl, token, canServer, ctaLabel, onGoToBilling }: {
   );
 
   return (
-    <LockedPreview
-      locked={!canServer}
-      reason="Server API locked"
-      subtitle="Activate the Server API or Master plan to use Method 1."
-      ctaLabel={ctaLabel}
-      onCta={onGoToBilling}
-    >
-      {content}
-    </LockedPreview>
+    <>
+      {overview}
+      <LockedPreview
+        locked={!canServer}
+        reason="Server API locked"
+        subtitle="Activate the Server API or Master plan to unlock the Method 1 endpoints."
+        ctaLabel={ctaLabel}
+        onCta={onGoToBilling}
+      >
+        {endpoints}
+      </LockedPreview>
+      <StatusLegendCard />
+    </>
   );
 }
 
@@ -698,21 +753,24 @@ function HostedPageTab({ canHosted, ctaLabel, onGoToBilling }: {
   }
 }`;
 
-  const content = (
-    <>
-      <div className="gw-card">
-        <div className="gw-card-h">
-          <h3>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            Hosted payment page
-          </h3>
-          <span className="gw-badge mute">Method 2</span>
-        </div>
-        <p className="gw-muted" style={{ marginTop: -2 }}>
-          Your backend creates the order and receives a <code>payment_page_url</code>. Send that URL to the customer. The hosted page handles the QR display, UPI app links, status polling, and the final redirect.
-        </p>
-      </div>
+  const overview = (
+    <MethodOverviewCard
+      icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>}
+      title="Hosted payment page"
+      methodLabel="Method 2"
+      description="Your backend creates the order and receives a payment_page_url. Send that URL to the customer — the hosted page handles QR display, UPI app links, status polling, and the final redirect."
+      features={[
+        { title: 'Drop-in checkout',  sub: 'Zero UI work — just send a URL' },
+        { title: 'Auto QR + intents', sub: 'GPay, PhonePe, Paytm deep-links built in' },
+        { title: 'Auto status poll',  sub: 'Customer sees live status without refresh' },
+        { title: 'Smart redirect',    sub: 'Lands on your redirect_url after paid' },
+      ]}
+      bestFor="Online stores, link-in-bio, fast launches, no-code flows"
+    />
+  );
 
+  const endpoints = (
+    <>
       <div className="gw-card">
         <div className="gw-card-h">
           <h3>Create order</h3>
@@ -818,15 +876,19 @@ function HostedPageTab({ canHosted, ctaLabel, onGoToBilling }: {
   );
 
   return (
-    <LockedPreview
-      locked={!canHosted}
-      reason="Hosted Pay Page locked"
-      subtitle="Activate the Hosted Pay Page or Master plan to use Method 2."
-      ctaLabel={ctaLabel}
-      onCta={onGoToBilling}
-    >
-      {content}
-    </LockedPreview>
+    <>
+      {overview}
+      <LockedPreview
+        locked={!canHosted}
+        reason="Hosted Pay Page locked"
+        subtitle="Activate the Hosted Pay Page or Master plan to unlock the Method 2 endpoints."
+        ctaLabel={ctaLabel}
+        onCta={onGoToBilling}
+      >
+        {endpoints}
+      </LockedPreview>
+      <StatusLegendCard />
+    </>
   );
 }
 
@@ -884,12 +946,34 @@ function SetupTab({ baseUrl, canServer, canHosted, isMasterOrOwner, hasPlan, ser
     </div>
   );
 
+  const quickStart = (
+    <div className="gw-card">
+      <div className="gw-card-h">
+        <h3>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          Quick start
+        </h3>
+        <span className="gw-badge mute">3 steps</span>
+      </div>
+      <p className="gw-muted" style={{ marginTop: -2 }}>
+        The same path for every plan — pick the method below that matches what you bought, then follow the detailed steps.
+      </p>
+      <ol className="gw-steps">
+        <li>Choose a plan that matches your method (Server API, Hosted Page, or Master).</li>
+        <li>Save your UPI settings in the dashboard.</li>
+        <li>Generate an API token and start creating orders.</li>
+      </ol>
+    </div>
+  );
+
   return (
     <>
+      {quickStart}
+
       <LockedPreview
         locked={!canServer}
-        reason={!hasPlan ? 'Choose a plan to unlock setup guide.' : 'Server API setup locked.'}
-        subtitle={!hasPlan ? undefined : 'Upgrade to Master to unlock both methods.'}
+        reason={!hasPlan ? 'Method 1 setup locked' : 'Server API setup locked.'}
+        subtitle={!hasPlan ? 'Choose a plan to unlock the Server API guide.' : 'Upgrade to Master to unlock both methods.'}
         ctaLabel={serverCtaLabel}
         onCta={onGoToBilling}
       >
@@ -898,8 +982,8 @@ function SetupTab({ baseUrl, canServer, canHosted, isMasterOrOwner, hasPlan, ser
 
       <LockedPreview
         locked={!canHosted}
-        reason={!hasPlan ? 'Choose a plan to unlock setup guide.' : 'Hosted Pay Page setup locked.'}
-        subtitle={!hasPlan ? undefined : 'Upgrade to Master to unlock both methods.'}
+        reason={!hasPlan ? 'Method 2 setup locked' : 'Hosted Pay Page setup locked.'}
+        subtitle={!hasPlan ? 'Choose a plan to unlock the Hosted Page guide.' : 'Upgrade to Master to unlock both methods.'}
         ctaLabel={hostedCtaLabel}
         onCta={onGoToBilling}
       >
