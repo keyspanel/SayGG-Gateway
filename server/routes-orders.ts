@@ -54,7 +54,10 @@ router.get('/transactions', gwSession, async (req: GwSessionRequest, res: Respon
 
 router.get('/dashboard', gwSession, async (req: GwSessionRequest, res: Response) => {
   const userId = req.gwUser!.id;
-  const stats = await pool.query(
+
+  // All-time totals + revenue (the original behaviour, kept for the
+  // top-line KPIs and back-compat with anything still reading `stats`).
+  const statsP = pool.query(
     `SELECT
        COUNT(*)::int AS total,
        COUNT(*) FILTER (WHERE status='paid')::int AS paid,
@@ -64,18 +67,119 @@ router.get('/dashboard', gwSession, async (req: GwSessionRequest, res: Response)
      FROM gw_orders WHERE user_id=$1`,
     [userId],
   );
-  const recent = await pool.query(
-    `SELECT id, txn_ref, client_order_id, amount, currency, status, created_at,
-            COALESCE(order_mode, 'hosted') AS order_mode
-     FROM gw_orders WHERE user_id=$1 ORDER BY id DESC LIMIT 10`,
+
+  // Two consecutive 30-day windows so the UI can show deltas vs prior
+  // period (revenue change, success-rate change, AOV change, etc).
+  const windowedP = pool.query(
+    `SELECT
+       -- last 30 days
+       COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days')::int                             AS w_total,
+       COUNT(*) FILTER (WHERE status='paid'    AND created_at >= NOW() - INTERVAL '30 days')::int        AS w_paid,
+       COUNT(*) FILTER (WHERE status='pending' AND created_at >= NOW() - INTERVAL '30 days')::int        AS w_pending,
+       COUNT(*) FILTER (WHERE status IN ('failed','cancelled','expired')
+                          AND created_at >= NOW() - INTERVAL '30 days')::int                             AS w_failed,
+       COALESCE(SUM(amount) FILTER (WHERE status='paid'
+                          AND created_at >= NOW() - INTERVAL '30 days'), 0)::float                       AS w_revenue,
+       -- prior 30 days (30-60 days ago) for delta comparison
+       COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '60 days'
+                          AND created_at <  NOW() - INTERVAL '30 days')::int                             AS p_total,
+       COUNT(*) FILTER (WHERE status='paid'
+                          AND created_at >= NOW() - INTERVAL '60 days'
+                          AND created_at <  NOW() - INTERVAL '30 days')::int                             AS p_paid,
+       COALESCE(SUM(amount) FILTER (WHERE status='paid'
+                          AND created_at >= NOW() - INTERVAL '60 days'
+                          AND created_at <  NOW() - INTERVAL '30 days'), 0)::float                       AS p_revenue
+     FROM gw_orders
+     WHERE user_id=$1`,
     [userId],
   );
-  const settings = await pool.query(
+
+  // Daily revenue + count for the last 30 days, gap-filled with zeros so
+  // the sparkline is always exactly 30 points wide.
+  const seriesP = pool.query(
+    `WITH days AS (
+       SELECT generate_series(
+         (CURRENT_DATE - INTERVAL '29 days')::date,
+         CURRENT_DATE::date,
+         INTERVAL '1 day'
+       )::date AS day
+     ),
+     buckets AS (
+       SELECT (created_at AT TIME ZONE 'UTC')::date AS day,
+              SUM(amount) FILTER (WHERE status='paid')::float AS revenue,
+              COUNT(*) FILTER (WHERE status='paid')::int      AS paid,
+              COUNT(*)::int                                   AS total
+         FROM gw_orders
+        WHERE user_id=$1
+          AND created_at >= NOW() - INTERVAL '30 days'
+        GROUP BY 1
+     )
+     SELECT d.day::text AS day,
+            COALESCE(b.revenue, 0) AS revenue,
+            COALESCE(b.paid, 0)    AS paid,
+            COALESCE(b.total, 0)   AS total
+       FROM days d
+       LEFT JOIN buckets b ON b.day = d.day
+       ORDER BY d.day ASC`,
+    [userId],
+  );
+
+  // Most-recent open orders so the operator has a one-click "what needs
+  // chasing" panel right on the overview.
+  const pendingP = pool.query(
+    `SELECT id, txn_ref, client_order_id, amount, currency, created_at, expires_at,
+            COALESCE(order_mode, 'hosted') AS order_mode
+       FROM gw_orders
+      WHERE user_id=$1 AND status='pending'
+      ORDER BY id DESC
+      LIMIT 5`,
+    [userId],
+  );
+
+  const recentP = pool.query(
+    `SELECT id, txn_ref, client_order_id, amount, currency, status, created_at,
+            COALESCE(order_mode, 'hosted') AS order_mode
+       FROM gw_orders
+      WHERE user_id=$1
+      ORDER BY id DESC
+      LIMIT 10`,
+    [userId],
+  );
+
+  const settingsP = pool.query(
     `SELECT is_active, paytm_upi_id, paytm_merchant_id FROM gw_settings WHERE user_id=$1`,
     [userId],
   );
+
+  const [stats, windowed, series, pending, recent, settings] = await Promise.all([
+    statsP, windowedP, seriesP, pendingP, recentP, settingsP,
+  ]);
+
+  const w = windowed.rows[0] || {};
+  const closed30 = (w.w_paid || 0) + (w.w_failed || 0);
+  const successRate30 = closed30 > 0 ? (w.w_paid / closed30) * 100 : 0;
+  const aov30 = (w.w_paid || 0) > 0 ? (w.w_revenue || 0) / w.w_paid : 0;
+  const aovPrev = (w.p_paid || 0) > 0 ? (w.p_revenue || 0) / w.p_paid : 0;
+
   apiSuccess(res, 'Dashboard loaded', {
     stats: stats.rows[0],
+    last_30: {
+      total: w.w_total || 0,
+      paid: w.w_paid || 0,
+      pending: w.w_pending || 0,
+      failed: w.w_failed || 0,
+      revenue: w.w_revenue || 0,
+      aov: aov30,
+      success_rate: successRate30,
+    },
+    prev_30: {
+      total: w.p_total || 0,
+      paid: w.p_paid || 0,
+      revenue: w.p_revenue || 0,
+      aov: aovPrev,
+    },
+    series_30: series.rows,
+    pending_orders: pending.rows,
     recent: recent.rows,
     setup_complete: !!settings.rows[0]?.is_active,
     has_token: !!req.gwUser!.api_token,
