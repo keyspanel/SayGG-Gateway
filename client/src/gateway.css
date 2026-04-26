@@ -3238,3 +3238,141 @@ code {
   color: var(--gw-bad);
   border: 1px solid rgba(185, 28, 28, 0.18);
 }
+
+/* =========================================================================
+   Multi-step billing checkout (BillingCheckoutDetails / BillingCheckoutConfirm)
+   Premium two-column layout: form on the left, sticky order summary on right.
+   ========================================================================= */
+
+.gw-checkout {
+  display: flex; flex-direction: column; gap: 18px;
+}
+
+.gw-checkout-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12.5px;
+}
+.gw-step {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px 6px 6px;
+  border-radius: 999px;
+  background: var(--gw-bg-2);
+  color: var(--gw-text-mute);
+  border: 1px solid var(--gw-border);
+  white-space: nowrap;
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease;
+}
+.gw-step.on {
+  background: var(--gw-primary-soft);
+  color: var(--gw-primary);
+  border-color: rgba(79,70,229,0.25);
+}
+.gw-step.done {
+  background: var(--gw-ok-bg);
+  color: var(--gw-ok);
+  border-color: rgba(22,163,74,0.25);
+}
+.gw-step-num {
+  width: 22px; height: 22px; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 12px;
+  background: var(--gw-surface);
+  color: var(--gw-text-mute);
+  border: 1px solid var(--gw-border);
+}
+.gw-step.on .gw-step-num,
+.gw-step.done .gw-step-num {
+  background: currentColor;
+  color: var(--gw-surface);
+  border-color: currentColor;
+}
+.gw-step-lbl { font-weight: 600; letter-spacing: 0.01em; }
+.gw-step-bar {
+  flex: 1 1 16px;
+  min-width: 16px;
+  max-width: 28px;
+  height: 1px;
+  background: var(--gw-border);
+  list-style: none;
+}
+
+.gw-checkout-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 880px) {
+  .gw-checkout-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.gw-checkout-form-card { display: flex; flex-direction: column; gap: 14px; }
+
+.gw-checkout-actions {
+  display: flex; justify-content: flex-end; gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--gw-border);
+  margin-top: 4px;
+}
+@media (max-width: 540px) {
+  .gw-checkout-actions { flex-direction: column-reverse; }
+  .gw-checkout-actions > * { width: 100%; justify-content: center; }
+}
+
+.gw-checkout-summary {
+  position: sticky; top: 12px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.gw-checkout-sum-h {
+  font-size: 11.5px; font-weight: 800; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--gw-text-mute);
+}
+.gw-checkout-plan {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px;
+  background: var(--gw-surface-2);
+  border: 1px solid var(--gw-border);
+  border-radius: 12px;
+}
+.gw-checkout-amt { font-size: 18px; font-weight: 800; color: var(--gw-text); }
+.gw-checkout-lines {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 4px 2px 0;
+  font-size: 13.5px;
+}
+.gw-checkout-lines > div {
+  display: flex; justify-content: space-between; gap: 12px;
+  color: var(--gw-text-mute);
+}
+.gw-checkout-lines > div > span:last-child {
+  color: var(--gw-text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.gw-checkout-total {
+  margin-top: 6px; padding-top: 10px;
+  border-top: 1px dashed var(--gw-border);
+  font-size: 15.5px;
+}
+.gw-checkout-total > span {
+  color: var(--gw-text) !important;
+  font-weight: 800 !important;
+}
+.gw-checkout-secure {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin: 4px 0 0;
+  font-size: 12px; color: var(--gw-text-mute);
+  font-weight: 600;
+}
+.gw-checkout-back {
+  font-size: 12.5px; font-weight: 600;
+  color: var(--gw-primary);
+  text-decoration: none;
+  margin-top: 4px;
+}
+.gw-checkout-back:hover { text-decoration: underline; }

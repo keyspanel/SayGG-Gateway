@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { apiGet, apiPost, ApiError } from './api';
+import { Link, useNavigate } from 'react-router-dom';
+import { apiGet } from './api';
 import { useGwAuth } from './AuthCtx';
 
 interface Plan {
@@ -22,23 +22,18 @@ type BillingPeriod = 'monthly' | 'yearly';
 
 export default function Billing() {
   const { user } = useGwAuth();
+  const nav = useNavigate();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [me, setMe] = useState<any>(null);
-  const [platformFee, setPlatformFee] = useState<number>(0);
   const [period, setPeriod] = useState<BillingPeriod>('monthly');
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
-  const [busy, setBusy] = useState<number | null>(null);
-
-  // Two-step checkout sheet
-  const [sheetPlan, setSheetPlan] = useState<Plan | null>(null);
 
   const load = async () => {
     setLoading(true); setErr('');
     try {
       const [p, m] = await Promise.all([apiGet('/api/billing/plans'), apiGet('/api/billing/me')]);
       setPlans(p.items || []);
-      setPlatformFee(typeof p.platform_fee === 'number' ? p.platform_fee : (typeof m.platform_fee === 'number' ? m.platform_fee : 0));
       setMe(m);
     } catch (e: any) {
       setErr(e.message);
@@ -60,30 +55,10 @@ export default function Billing() {
 
   const sub = me?.active_subscription;
   const hasYearly = plans.some((p) => p.duration_days >= 200);
-  const initialProfile = me?.billing_profile || null;
 
   const onChoose = (plan: Plan) => {
     setErr('');
-    setSheetPlan(plan);
-  };
-
-  const onSheetCompleted = async (planId: number) => {
-    setBusy(planId);
-    try {
-      const order = await apiPost('/api/billing/purchase', { plan_id: planId });
-      window.location.href = `/billing/pay/${order.public_token}`;
-    } catch (e: any) {
-      const code = e instanceof ApiError ? e.code : '';
-      if (code === 'PLATFORM_PAYMENT_NOT_CONFIGURED') {
-        setErr('Plan checkout is temporarily unavailable. Please try again shortly.');
-      } else if (code === 'BILLING_PROFILE_REQUIRED') {
-        setErr('Please complete the billing form before continuing.');
-      } else {
-        setErr(e.message);
-      }
-      setSheetPlan(null);
-      setBusy(null);
-    }
+    nav(`/gateway/billing/checkout/${plan.id}`);
   };
 
   return (
@@ -199,10 +174,9 @@ export default function Billing() {
               ) : (
                 <button
                   className={featured ? 'gw-btn-primary gw-btn-block' : 'gw-btn-ghost gw-btn-block'}
-                  disabled={busy === p.id}
                   onClick={() => onChoose(p)}
                 >
-                  {busy === p.id ? 'Starting…' : sub ? 'Switch / renew' : 'Choose plan'}
+                  {sub ? 'Switch / renew' : 'Choose plan'}
                 </button>
               )}
             </div>
@@ -236,258 +210,6 @@ export default function Billing() {
           </div>
         </div>
       )}
-
-      {sheetPlan && (
-        <CheckoutSheet
-          plan={sheetPlan}
-          fee={platformFee}
-          initialProfile={initialProfile}
-          defaultEmail={user?.email || ''}
-          onClose={() => setSheetPlan(null)}
-          onConfirmed={() => onSheetCompleted(sheetPlan.id)}
-        />
-      )}
-    </div>
-  );
-}
-
-/* ----------------------------- Two-step sheet ----------------------------- */
-
-interface SheetProps {
-  plan: Plan;
-  fee: number;
-  initialProfile: any;
-  defaultEmail: string;
-  onClose: () => void;
-  onConfirmed: () => void;
-}
-
-interface FormState {
-  email: string;
-  phone: string;
-  full_name: string;
-  city: string;
-  postal_code: string;
-}
-
-function CheckoutSheet({ plan, fee, initialProfile, defaultEmail, onClose, onConfirmed }: SheetProps) {
-  const [step, setStep] = useState<'form' | 'confirm'>('form');
-
-  // Lock background scroll while the sheet is open (prevents the page behind from
-  // scrolling on mobile when the user drags inside the sheet).
-  useEffect(() => {
-    const { body, documentElement } = document;
-    const prevBody = body.style.overflow;
-    const prevHtml = documentElement.style.overflow;
-    body.style.overflow = 'hidden';
-    documentElement.style.overflow = 'hidden';
-    return () => {
-      body.style.overflow = prevBody;
-      documentElement.style.overflow = prevHtml;
-    };
-  }, []);
-
-  // Close on Escape for accessibility.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  const [form, setForm] = useState<FormState>({
-    email: initialProfile?.email || defaultEmail || '',
-    phone: initialProfile?.phone || '',
-    full_name: initialProfile?.full_name || '',
-    city: initialProfile?.city || '',
-    postal_code: initialProfile?.postal_code || '',
-  });
-  const [err, setErr] = useState('');
-  const [errField, setErrField] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  const set = (k: keyof FormState, v: string) => setForm((f) => ({ ...f, [k]: v }));
-
-  const planPrice = plan.discount_price ?? plan.price;
-  const total = Math.round((planPrice + (fee || 0)) * 100) / 100;
-
-  const validateLocal = (): { ok: boolean; field?: string; message?: string } => {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email.trim())) return { ok: false, field: 'email', message: 'Enter a valid email address.' };
-    if (!/^[\+]?[0-9\-\s\(\)]{6,40}$/.test(form.phone.trim())) return { ok: false, field: 'phone', message: 'Mobile number looks invalid.' };
-    if (form.full_name.trim().length < 2) return { ok: false, field: 'full_name', message: 'Name is required.' };
-    if (form.city.trim().length < 2) return { ok: false, field: 'city', message: 'City is required.' };
-    if (!/^[1-9][0-9]{5}$/.test(form.postal_code.trim())) return { ok: false, field: 'postal_code', message: 'Indian PIN code must be 6 digits.' };
-    return { ok: true };
-  };
-
-  const goToConfirm = (e: React.FormEvent) => {
-    e.preventDefault();
-    setErr(''); setErrField('');
-    const v = validateLocal();
-    if (!v.ok) { setErr(v.message || 'Please check the form.'); setErrField(v.field || ''); return; }
-    setStep('confirm');
-  };
-
-  const confirm = async () => {
-    setSaving(true); setErr(''); setErrField('');
-    try {
-      await apiPost('/api/billing/profile', {
-        full_name: form.full_name.trim(),
-        email: form.email.trim().toLowerCase(),
-        phone: form.phone.trim(),
-        country: 'IN',
-        city: form.city.trim(),
-        postal_code: form.postal_code.trim(),
-      });
-      onConfirmed();
-    } catch (e: any) {
-      setErr(e.message);
-      if (e instanceof ApiError && e.details && (e.details as any).field) {
-        setErrField((e.details as any).field);
-      }
-      setStep('form');
-      setSaving(false);
-    }
-  };
-
-  const formId = 'gw-checkout-form';
-
-  return (
-    <div className="gw-modal-overlay" onClick={() => !saving && onClose()}>
-      <div className="gw-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="cs-h">
-        <div className="gw-sheet-handle" aria-hidden="true" />
-        <div className="gw-sheet-h">
-          <div>
-            <h3 id="cs-h">{step === 'form' ? 'Your details' : 'Confirm purchase'}</h3>
-            <p className="gw-muted">
-              {step === 'form'
-                ? 'Required for invoicing. Stored against your account.'
-                : 'Review your details and the plan amount before paying.'}
-            </p>
-          </div>
-          <button className="gw-btn-ghost xs" onClick={onClose} aria-label="Close" disabled={saving}>✕</button>
-        </div>
-
-        <div className="gw-sheet-body">
-          {err && <div className="gw-alert error"><span>{err}</span></div>}
-
-          {step === 'form' ? (
-            <form id={formId} className="gw-billing-form" onSubmit={goToConfirm} noValidate>
-              <label className={errField === 'email' ? 'err' : ''}>
-                <span>Gmail / Email *</span>
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => set('email', e.target.value)}
-                  placeholder="you@gmail.com"
-                  maxLength={255}
-                  autoFocus
-                  required
-                />
-              </label>
-              <label className={errField === 'phone' ? 'err' : ''}>
-                <span>Mobile number *</span>
-                <input
-                  value={form.phone}
-                  onChange={(e) => set('phone', e.target.value)}
-                  placeholder="+91 98xxxxxxxx"
-                  maxLength={40}
-                  inputMode="tel"
-                  required
-                />
-              </label>
-              <label className={errField === 'full_name' ? 'err' : ''}>
-                <span>Name *</span>
-                <input
-                  value={form.full_name}
-                  onChange={(e) => set('full_name', e.target.value)}
-                  placeholder="Your name"
-                  maxLength={120}
-                  required
-                />
-              </label>
-              <label>
-                <span>Country</span>
-                <input value="India" disabled readOnly />
-              </label>
-              <div className="gw-form-row">
-                <label className={errField === 'city' ? 'err' : ''}>
-                  <span>City *</span>
-                  <input value={form.city} onChange={(e) => set('city', e.target.value)} maxLength={120} required />
-                </label>
-                <label className={errField === 'postal_code' ? 'err' : ''}>
-                  <span>Postal / ZIP *</span>
-                  <input
-                    value={form.postal_code}
-                    onChange={(e) => set('postal_code', e.target.value)}
-                    placeholder="6-digit PIN"
-                    maxLength={6}
-                    inputMode="numeric"
-                    required
-                  />
-                </label>
-              </div>
-            </form>
-          ) : (
-            <div className="gw-confirm">
-              <div className="gw-confirm-block">
-                <div className="gw-confirm-block-h">Billing to</div>
-                <div className="gw-confirm-rows">
-                  <div><span>Name</span><b>{form.full_name}</b></div>
-                  <div><span>Email</span><b>{form.email}</b></div>
-                  <div><span>Mobile</span><b>{form.phone}</b></div>
-                  <div><span>Country</span><b>India</b></div>
-                  <div><span>City</span><b>{form.city}</b></div>
-                  <div><span>Postal / ZIP</span><b>{form.postal_code}</b></div>
-                </div>
-                <button type="button" className="gw-btn-ghost xs gw-confirm-edit" onClick={() => setStep('form')} disabled={saving}>
-                  Edit details
-                </button>
-              </div>
-
-              <div className="gw-confirm-block">
-                <div className="gw-confirm-block-h">Selected plan</div>
-                <div className="gw-confirm-plan">
-                  <div>
-                    <b>{plan.name}</b>
-                    <div className="gw-muted" style={{ fontSize: 12 }}>{labelMethod(plan.method_access)} · {plan.duration_days >= 200 ? '1 year' : `${plan.duration_days} days`}</div>
-                  </div>
-                  <div className="gw-confirm-amt">₹{planPrice.toFixed(2)}</div>
-                </div>
-              </div>
-
-              <div className="gw-confirm-block totals">
-                <div className="gw-confirm-line">
-                  <span>Plan</span><span>₹{planPrice.toFixed(2)}</span>
-                </div>
-                <div className="gw-confirm-line">
-                  <span>Fee</span><span>{fee > 0 ? `₹${fee.toFixed(2)}` : '₹0.00'}</span>
-                </div>
-                <div className="gw-confirm-line total">
-                  <span>Total payable</span><span>₹{total.toFixed(2)}</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="gw-sheet-foot">
-          {step === 'form' ? (
-            <>
-              <button type="button" className="gw-btn-ghost" onClick={onClose}>Cancel</button>
-              <button type="submit" form={formId} className="gw-btn-primary">Continue</button>
-            </>
-          ) : (
-            <>
-              <button type="button" className="gw-btn-ghost" onClick={() => setStep('form')} disabled={saving}>Back</button>
-              <button type="button" className="gw-btn-primary" onClick={confirm} disabled={saving}>
-                {saving ? 'Starting…' : `Confirm & pay ₹${total.toFixed(2)}`}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

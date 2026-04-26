@@ -117,7 +117,7 @@ function ProtectedMedia({
  *
  * The QR remains fully visible and scannable by any UPI app.
  */
-function PayQrCanvas({ payload, size }: { payload: string; size: number }) {
+export function PayQrCanvas({ payload, size }: { payload: string; size: number }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
   const [error, setError] = useState(false);
 
@@ -249,7 +249,7 @@ function formatTimeLeft(ms: number): string {
  */
 const ROLL_INTERVAL_MS = 2000;
 
-function SupportedApps() {
+export function SupportedApps() {
   const [idx, setIdx] = useState(0);
   const total = UPI_APPS.length;
 
@@ -594,7 +594,7 @@ function RedirectPanel({ order, variant, rawUrl }: { order: PayOrder; variant: R
  *  - Briefly swaps to a checkmark + "Copied" tooltip so the user gets
  *    feedback even without a separate toast.
  */
-function CopyButton({ value, label }: { value: string; label: string }) {
+export function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<number | undefined>(undefined);
 
@@ -718,7 +718,7 @@ function CountUpAmount({ value, duration = 950 }: { value: number; duration?: nu
  * still shows the final state, so accessibility users still get a clear
  * confirmation without movement.
  */
-function PaidStatusVisual({ order }: { order: PayOrder }) {
+export function PaidStatusVisual({ order }: { order: { amount: number; verified_at?: string | null } }) {
   // Confetti burst — 14 pieces with 3 shapes & a refined palette so the
   // celebration reads as premium, not loud. Each piece has its own angle,
   // distance, rotation, delay and duration so the burst feels organic

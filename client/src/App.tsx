@@ -12,6 +12,8 @@ import PayPage from './PayPage';
 import Billing from './Billing';
 import BillingSuccess from './BillingSuccess';
 import BillingPayPage from './BillingPayPage';
+import BillingCheckoutDetails from './BillingCheckoutDetails';
+import BillingCheckoutConfirm from './BillingCheckoutConfirm';
 import OwnerPanel, {
   OwnerOverview, OwnerPlans, OwnerUsers, OwnerPlanOrders, OwnerPlatformSettings,
 } from './OwnerPanel';
@@ -64,6 +66,8 @@ export default function App() {
           <Route path="transactions" element={<GwTransactions />} />
           <Route path="docs" element={<GwDocs />} />
           <Route path="billing" element={<Billing />} />
+          <Route path="billing/checkout/:planId" element={<BillingCheckoutDetails />} />
+          <Route path="billing/checkout/:planId/confirm" element={<BillingCheckoutConfirm />} />
           <Route path="billing/success" element={<BillingSuccess />} />
 
           <Route path="owner" element={<OwnerRoute><OwnerPanel /></OwnerRoute>}>
