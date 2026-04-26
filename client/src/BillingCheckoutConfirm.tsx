@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Link, useLocation, useNavigate, useParams, Navigate } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, Navigate } from 'react-router-dom';
 import { apiPost, ApiError } from './api';
-import { CheckoutSteps, type CheckoutFormState } from './BillingCheckoutDetails';
+import { CheckoutSteps, CheckoutSummaryMini, type CheckoutFormState } from './BillingCheckoutDetails';
 
 interface PassedState {
   form: CheckoutFormState;
@@ -85,93 +85,51 @@ export default function BillingCheckoutConfirm() {
     <div className="gw-page gw-checkout">
       <CheckoutSteps current={2} />
 
-      <div className="gw-checkout-grid">
-        <div className="gw-card gw-checkout-form-card">
-          <div className="gw-card-h">
-            <div>
-              <h2 style={{ margin: 0 }}>Confirm purchase</h2>
-              <p className="gw-muted" style={{ margin: '4px 0 0' }}>Review your details and the plan amount before paying.</p>
-            </div>
-          </div>
+      <CheckoutSummaryMini plan={plan} planPrice={planPrice} fee={fee} total={total} />
 
-          {err && <div className="gw-alert error"><span>{err}</span></div>}
-
-          <div className="gw-confirm-block">
-            <div className="gw-confirm-block-h gw-confirm-block-h-row">
-              <span>Billing to</span>
-              <button
-                type="button"
-                className="gw-confirm-edit-btn"
-                onClick={goBack}
-                disabled={saving}
-                aria-label="Edit billing details"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M12 20h9" />
-                  <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-                </svg>
-                Edit details
-              </button>
-            </div>
-            <div className="gw-confirm-rows">
-              <div><span>Name</span><b>{form.full_name}</b></div>
-              <div><span>Email</span><b>{form.email}</b></div>
-              <div><span>Mobile</span><b>{form.phone}</b></div>
-              <div><span>Country</span><b>India</b></div>
-              <div><span>City</span><b>{form.city}</b></div>
-              <div><span>Postal / ZIP</span><b>{form.postal_code}</b></div>
-            </div>
-          </div>
-
-          <div className="gw-confirm-block">
-            <div className="gw-confirm-block-h">Selected plan</div>
-            <div className="gw-confirm-plan">
-              <div>
-                <b>{plan.name}</b>
-                <div className="gw-muted" style={{ fontSize: 12 }}>
-                  {labelMethod(plan.method_access)} · {plan.duration_days >= 200 ? '1 year' : `${plan.duration_days} days`}
-                </div>
-              </div>
-              <div className="gw-confirm-amt">₹{planPrice.toFixed(2)}</div>
-            </div>
-          </div>
-
-          <div className="gw-checkout-actions">
-            <button type="button" className="gw-btn-ghost" onClick={goBack} disabled={saving}>Back</button>
-            <button type="button" className="gw-btn-primary" onClick={confirm} disabled={saving}>
-              {saving ? 'Starting…' : `Confirm & pay ₹${total.toFixed(2)}`}
-            </button>
+      <div className="gw-card gw-checkout-form-card">
+        <div className="gw-card-h">
+          <div>
+            <h2 style={{ margin: 0 }}>Confirm purchase</h2>
+            <p className="gw-muted" style={{ margin: '4px 0 0' }}>Review your details and the plan amount before paying.</p>
           </div>
         </div>
 
-        <aside className="gw-card gw-checkout-summary">
-          <div className="gw-checkout-sum-h">Order summary</div>
-          <div className="gw-checkout-plan">
-            <div>
-              <b>{plan.name}</b>
-              <div className="gw-muted" style={{ fontSize: 12 }}>
-                {labelMethod(plan.method_access)} · {plan.duration_days >= 200 ? '1 year' : `${plan.duration_days} days`}
-              </div>
-            </div>
-            <div className="gw-checkout-amt">₹{planPrice.toFixed(2)}</div>
+        {err && <div className="gw-alert error"><span>{err}</span></div>}
+
+        <div className="gw-confirm-block">
+          <div className="gw-confirm-block-h gw-confirm-block-h-row">
+            <span>Billing to</span>
+            <button
+              type="button"
+              className="gw-confirm-edit-btn"
+              onClick={goBack}
+              disabled={saving}
+              aria-label="Edit billing details"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+              </svg>
+              Edit details
+            </button>
           </div>
-
-          <div className="gw-checkout-lines">
-            <div><span>Plan</span><span>₹{planPrice.toFixed(2)}</span></div>
-            <div><span>Fee</span><span>{fee > 0 ? `₹${fee.toFixed(2)}` : '₹0.00'}</span></div>
-            <div className="gw-checkout-total"><span>Total payable</span><span>₹{total.toFixed(2)}</span></div>
+          <div className="gw-confirm-rows">
+            <div><span>Name</span><b>{form.full_name}</b></div>
+            <div><span>Email</span><b>{form.email}</b></div>
+            <div><span>Mobile</span><b>{form.phone}</b></div>
+            <div><span>Country</span><b>India</b></div>
+            <div><span>City</span><b>{form.city}</b></div>
+            <div><span>Postal / ZIP</span><b>{form.postal_code}</b></div>
           </div>
+        </div>
 
-          <p className="gw-checkout-secure">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="4" y="11" width="16" height="10" rx="2" />
-              <path d="M8 11V7a4 4 0 0 1 8 0v4" />
-            </svg>
-            Secure UPI checkout
-          </p>
-
-          <Link to="/gateway/billing" className="gw-checkout-back">← Back to plans</Link>
-        </aside>
+        <div className="gw-checkout-actions">
+          <button type="button" className="gw-btn-ghost" onClick={goBack} disabled={saving}>Back</button>
+          <button type="button" className="gw-btn-primary" onClick={confirm} disabled={saving}>
+            {saving ? 'Starting…' : `Confirm & pay ₹${total.toFixed(2)}`}
+          </button>
+        </div>
       </div>
     </div>
   );

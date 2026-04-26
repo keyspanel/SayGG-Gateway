@@ -181,18 +181,19 @@ export default function BillingCheckoutDetails() {
     <div className="gw-page gw-checkout">
       <CheckoutSteps current={1} />
 
-      <div className="gw-checkout-grid">
-        <div className="gw-card gw-checkout-form-card">
-          <div className="gw-card-h">
-            <div>
-              <h2 style={{ margin: 0 }}>Billing details</h2>
-              <p className="gw-muted" style={{ margin: '4px 0 0' }}>Required for invoicing. Stored against your account.</p>
-            </div>
+      <CheckoutSummaryMini plan={plan} planPrice={planPrice} fee={fee} total={total} />
+
+      <div className="gw-card gw-checkout-form-card">
+        <div className="gw-card-h">
+          <div>
+            <h2 style={{ margin: 0 }}>Billing details</h2>
+            <p className="gw-muted" style={{ margin: '4px 0 0' }}>Required for invoicing. Stored against your account.</p>
           </div>
+        </div>
 
-          {err && <div className="gw-alert error"><span>{err}</span></div>}
+        {err && <div className="gw-alert error"><span>{err}</span></div>}
 
-          <form className="gw-billing-form" onSubmit={onSubmit} noValidate>
+        <form className="gw-billing-form" onSubmit={onSubmit} noValidate>
             <label className={errField === 'email' ? 'err' : ''}>
               <span>Gmail / Email *</span>
               <input
@@ -248,39 +249,44 @@ export default function BillingCheckoutDetails() {
               </label>
             </div>
 
-            <div className="gw-checkout-actions">
-              <Link to="/gateway/billing" className="gw-btn-ghost">Cancel</Link>
-              <button type="submit" className="gw-btn-primary">Continue</button>
-            </div>
-          </form>
-        </div>
-
-        <aside className="gw-card gw-checkout-summary">
-          <div className="gw-checkout-sum-h">Order summary</div>
-          <div className="gw-checkout-plan">
-            <div>
-              <b>{plan.name}</b>
-              <div className="gw-muted" style={{ fontSize: 12 }}>
-                {labelMethod(plan.method_access)} · {plan.duration_days >= 200 ? '1 year' : `${plan.duration_days} days`}
-              </div>
-            </div>
-            <div className="gw-checkout-amt">₹{planPrice.toFixed(2)}</div>
+          <div className="gw-checkout-actions">
+            <Link to="/gateway/billing" className="gw-btn-ghost">Cancel</Link>
+            <button type="submit" className="gw-btn-primary">Continue</button>
           </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
-          <div className="gw-checkout-lines">
-            <div><span>Plan</span><span>₹{planPrice.toFixed(2)}</span></div>
-            <div><span>Fee</span><span>{fee > 0 ? `₹${fee.toFixed(2)}` : '₹0.00'}</span></div>
-            <div className="gw-checkout-total"><span>Total payable</span><span>₹{total.toFixed(2)}</span></div>
-          </div>
-
-          <p className="gw-checkout-secure">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="4" y="11" width="16" height="10" rx="2" />
-              <path d="M8 11V7a4 4 0 0 1 8 0v4" />
-            </svg>
-            Secure UPI checkout
-          </p>
-        </aside>
+/**
+ * Compact one-line order summary used at the top of both checkout steps.
+ * Replaces the old sticky sidebar — same numbers, a fraction of the space.
+ * Wraps gracefully to two lines on narrow screens.
+ */
+export function CheckoutSummaryMini({
+  plan, planPrice, fee, total,
+}: {
+  plan: { name: string; method_access: string; duration_days: number };
+  planPrice: number;
+  fee: number;
+  total: number;
+}) {
+  const duration = plan.duration_days >= 200 ? '1 year' : `${plan.duration_days} days`;
+  return (
+    <div className="gw-card gw-checkout-mini" role="region" aria-label="Order summary">
+      <div className="gw-checkout-mini-plan">
+        <b className="gw-checkout-mini-name">{plan.name}</b>
+        <span className="gw-checkout-mini-meta">{labelMethod(plan.method_access)} · {duration}</span>
+      </div>
+      <div className="gw-checkout-mini-lines" aria-hidden="true">
+        <span>Plan ₹{planPrice.toFixed(2)}</span>
+        <span className="gw-checkout-mini-dot">+</span>
+        <span>Fee ₹{(fee || 0).toFixed(2)}</span>
+      </div>
+      <div className="gw-checkout-mini-total">
+        <span className="gw-checkout-mini-total-lbl">Total</span>
+        <b className="gw-checkout-mini-total-amt">₹{total.toFixed(2)}</b>
       </div>
     </div>
   );
