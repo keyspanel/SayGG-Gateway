@@ -277,6 +277,38 @@ export default function BillingCheckoutDetails() {
 
   const set = (k: keyof CheckoutFormState, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
+  // Per-field "is this filled with something valid?" map. Drives the
+  // "settled" muted look that mirrors the locked Gmail field, so the user
+  // can see at a glance which fields are already good. Computed in JS
+  // (instead of CSS :valid) so the rule is deterministic across browsers.
+  const filled = useMemo(() => {
+    const cs = canonicalizeState(form.state);
+    const ct = form.city.trim();
+    const cityOk = !!cs && (
+      !!canonicalizeCity(ct, cs) ||
+      !!(pinVerified && pinVerified.state === cs && pinVerified.city === ct)
+    );
+    return {
+      email: /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email.trim()),
+      phone: form.phone.length === 10,
+      full_name: form.full_name.trim().length >= 2,
+      state: !!cs,
+      city: cityOk,
+      postal_code: /^[1-9][0-9]{5}$/.test(form.postal_code),
+    };
+  }, [form, pinVerified]);
+
+  // Clear the inline error / red border the moment the user fixes the
+  // offending field, so a stale "Mobile number is invalid" warning doesn't
+  // hang around once they've typed the missing digit.
+  useEffect(() => {
+    if (!errField) return;
+    if (errField in filled && (filled as Record<string, boolean>)[errField]) {
+      setErrField('');
+      setErr('');
+    }
+  }, [errField, filled]);
+
   const validate = (): { ok: boolean; field?: string; message?: string } => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email.trim())) return { ok: false, field: 'email', message: 'Enter a valid email address.' };
     const phoneDigits = extractPhoneDigits(form.phone);
@@ -393,7 +425,7 @@ export default function BillingCheckoutDetails() {
             </label>
             <label className={errField === 'phone' ? 'err' : ''}>
               <span>Mobile number *</span>
-              <div className="gw-phone-input">
+              <div className={`gw-phone-input${filled.phone ? ' gw-filled' : ''}`}>
                 <span className="gw-phone-prefix" aria-hidden="true">+91</span>
                 <input
                   value={form.phone}
@@ -431,6 +463,7 @@ export default function BillingCheckoutDetails() {
                 onChange={(e) => set('full_name', e.target.value)}
                 placeholder="Your name"
                 maxLength={120}
+                className={filled.full_name ? 'gw-filled' : undefined}
                 required
               />
             </label>
@@ -446,7 +479,7 @@ export default function BillingCheckoutDetails() {
 
               <label className={`gw-address-pin${errField === 'postal_code' ? ' err' : ''}`}>
                 <span>PIN code *</span>
-                <div className={`gw-pin-input${pinStatus.kind === 'ok' ? ' ok' : ''}${pinStatus.kind === 'loading' ? ' loading' : ''}${pinStatus.kind === 'notfound' || pinStatus.kind === 'error' ? ' warn' : ''}`}>
+                <div className={`gw-pin-input${pinStatus.kind === 'ok' ? ' ok' : ''}${pinStatus.kind === 'loading' ? ' loading' : ''}${pinStatus.kind === 'notfound' || pinStatus.kind === 'error' ? ' warn' : ''}${filled.postal_code ? ' gw-filled' : ''}`}>
                   <input
                     value={form.postal_code}
                     onChange={(e) => {
@@ -489,6 +522,7 @@ export default function BillingCheckoutDetails() {
                   <span>State *</span>
                   <StateInput
                     value={form.state}
+                    filled={filled.state}
                     onChange={(v) => {
                       setForm((f) => ({
                         ...f,
@@ -502,6 +536,7 @@ export default function BillingCheckoutDetails() {
                   <span>City *</span>
                   <CityInput
                     value={form.city}
+                    filled={filled.city}
                     onChange={(v) => set('city', v)}
                     state={canonicalizeState(form.state)}
                   />
@@ -732,6 +767,7 @@ function GeoAutocomplete({
   ariaLabel,
   autoComplete,
   iconKind,
+  filled,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -742,6 +778,7 @@ function GeoAutocomplete({
   ariaLabel: string;
   autoComplete: string;
   iconKind: 'pin' | 'flag';
+  filled?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -853,7 +890,7 @@ function GeoAutocomplete({
       {disabled && emptyLabel && (
         <p className="gw-city-hint">{emptyLabel}</p>
       )}
-      <div className="gw-city-field">
+      <div className={`gw-city-field${filled ? ' gw-filled' : ''}`}>
         <span className="gw-city-icon" aria-hidden="true">{HeaderIcon}</span>
         <input
           ref={inputRef}
@@ -910,7 +947,7 @@ function GeoAutocomplete({
  * Required to be picked from the list; free-typed values won't pass the
  * form's `validate()` step.
  */
-function StateInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function StateInput({ value, onChange, filled }: { value: string; onChange: (v: string) => void; filled?: boolean }) {
   return (
     <GeoAutocomplete
       value={value}
@@ -921,6 +958,7 @@ function StateInput({ value, onChange }: { value: string; onChange: (v: string) 
       ariaLabel="State"
       autoComplete="address-level1"
       iconKind="flag"
+      filled={filled}
     />
   );
 }
@@ -934,10 +972,12 @@ function CityInput({
   value,
   onChange,
   state,
+  filled,
 }: {
   value: string;
   onChange: (v: string) => void;
   state: string;
+  filled?: boolean;
 }) {
   const source = state ? (CITIES_BY_STATE[state] || []) : [];
   return (
@@ -951,6 +991,7 @@ function CityInput({
       ariaLabel="City"
       autoComplete="address-level2"
       iconKind="pin"
+      filled={filled}
     />
   );
 }
