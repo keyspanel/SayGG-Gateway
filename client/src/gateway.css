@@ -2832,21 +2832,6 @@ code {
   box-shadow: 0 0 0 3px rgba(220,38,38,0.15);
 }
 
-/* Inline hint shown next to a field label (e.g. "From your account"). */
-.gw-billing-form label > span {
-  display: inline-flex; align-items: center; gap: 8px;
-  flex-wrap: wrap;
-}
-.gw-field-hint {
-  font-size: 10.5px; font-weight: 700;
-  letter-spacing: 0.04em; text-transform: uppercase;
-  color: var(--gw-text-mute);
-  background: var(--gw-surface-2);
-  border: 1px solid var(--gw-border);
-  padding: 1px 7px;
-  border-radius: 999px;
-}
-
 /* Locked / read-only input (e.g. account email that can't be changed). */
 .gw-billing-form input.gw-input-locked,
 .gw-billing-form input[readonly] {
@@ -2903,6 +2888,123 @@ code {
   box-shadow: none;
   background: transparent;
 }
+
+/* City input with an autocomplete dropdown of curated Indian cities. */
+.gw-city-wrap { position: relative; }
+.gw-city-field {
+  position: relative;
+  display: flex; align-items: center;
+  background: var(--gw-surface-2);
+  border: 1px solid var(--gw-border);
+  border-radius: 9px;
+  transition: border-color .12s ease, box-shadow .12s ease, background-color .12s ease;
+}
+.gw-city-field:focus-within {
+  border-color: var(--gw-primary);
+  box-shadow: 0 0 0 3px var(--gw-primary-soft);
+  background: var(--gw-surface);
+}
+.gw-billing-form label.err .gw-city-field {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220,38,38,0.15);
+}
+.gw-city-wrap.open .gw-city-field {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.gw-city-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; flex-shrink: 0;
+  color: var(--gw-text-mute);
+}
+.gw-city-field:focus-within .gw-city-icon { color: var(--gw-primary); }
+.gw-billing-form .gw-city-field input {
+  flex: 1 1 auto;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 10px 12px 10px 0;
+  font-weight: 500;
+}
+.gw-billing-form .gw-city-field input:focus {
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
+.gw-city-list {
+  position: absolute;
+  z-index: 20;
+  top: 100%; left: 0; right: 0;
+  margin: 0; padding: 6px;
+  list-style: none;
+  background: var(--gw-surface);
+  border: 1px solid var(--gw-primary);
+  border-top: none;
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06);
+  max-height: 280px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+:root[data-theme="dark"] .gw-city-list {
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.gw-city-opt {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--gw-text-soft);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color .08s ease, color .08s ease;
+}
+.gw-city-opt-pin {
+  color: var(--gw-text-faint);
+  flex-shrink: 0;
+}
+.gw-city-opt-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.gw-city-opt-tag {
+  font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--gw-text-faint);
+  background: var(--gw-surface-2);
+  border: 1px solid var(--gw-border);
+  padding: 1px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.gw-city-opt.on,
+.gw-city-opt:hover {
+  background: var(--gw-primary-soft);
+  color: var(--gw-text);
+}
+.gw-city-opt.on .gw-city-opt-pin,
+.gw-city-opt:hover .gw-city-opt-pin {
+  color: var(--gw-primary);
+}
+.gw-city-mark {
+  background: transparent;
+  color: var(--gw-primary);
+  font-weight: 700;
+  padding: 0;
+}
+/* Custom scrollbar so the dropdown blends with the rest of the UI. */
+.gw-city-list::-webkit-scrollbar { width: 8px; }
+.gw-city-list::-webkit-scrollbar-thumb {
+  background: var(--gw-border-strong);
+  border-radius: 999px;
+}
+.gw-city-list::-webkit-scrollbar-track { background: transparent; }
 .gw-form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3377,16 +3479,31 @@ code {
 .gw-step-num {
   width: 22px; height: 22px; border-radius: 999px;
   display: inline-flex; align-items: center; justify-content: center;
-  font-weight: 800; font-size: 12px;
+  font-weight: 800; font-size: 12px; line-height: 1;
   background: var(--gw-surface);
   color: var(--gw-text-mute);
   border: 1px solid var(--gw-border);
+  flex-shrink: 0;
 }
-.gw-step.on .gw-step-num,
+/* Use explicit colors here — we can't use `currentColor` because the
+   parent .gw-step.on/.done has color set to the accent (indigo/green),
+   and re-assigning `color` on the badge in the same rule would make
+   currentColor resolve to the new color (the text color), erasing the
+   contrast between text and background. */
+.gw-step.on .gw-step-num {
+  background: var(--gw-primary);
+  color: #ffffff;
+  border-color: var(--gw-primary);
+}
 .gw-step.done .gw-step-num {
-  background: currentColor;
-  color: var(--gw-surface);
-  border-color: currentColor;
+  background: var(--gw-ok);
+  color: #ffffff;
+  border-color: var(--gw-ok);
+}
+/* Dark theme: the accent shades are lighter, so a dark glyph reads better. */
+:root[data-theme="dark"] .gw-step.on .gw-step-num,
+:root[data-theme="dark"] .gw-step.done .gw-step-num {
+  color: #0b0b0f;
 }
 .gw-step-lbl { font-weight: 600; letter-spacing: 0.01em; }
 .gw-step-bar {

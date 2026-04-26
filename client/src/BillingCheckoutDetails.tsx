@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { apiGet, ApiError } from './api';
 import { useGwAuth } from './AuthCtx';
+import { INDIAN_CITIES } from './indianCities';
 
 interface Plan {
   id: number;
@@ -214,10 +215,7 @@ export default function BillingCheckoutDetails() {
 
         <form className="gw-billing-form" onSubmit={onSubmit} noValidate>
             <label className={errField === 'email' ? 'err' : ''}>
-              <span>
-                Gmail / Email *
-                <span className="gw-field-hint" aria-hidden="true">From your account</span>
-              </span>
+              <span>Gmail / Email *</span>
               <input
                 type="email"
                 value={form.email}
@@ -272,7 +270,10 @@ export default function BillingCheckoutDetails() {
             <div className="gw-form-row">
               <label className={errField === 'city' ? 'err' : ''}>
                 <span>City *</span>
-                <input value={form.city} onChange={(e) => set('city', e.target.value)} maxLength={120} required />
+                <CityInput
+                  value={form.city}
+                  onChange={(v) => set('city', v)}
+                />
               </label>
               <label className={errField === 'postal_code' ? 'err' : ''}>
                 <span>Postal / ZIP *</span>
@@ -471,6 +472,168 @@ function labelMethod(m: string) {
   if (m === 'hosted') return 'Hosted Pay Page only';
   if (m === 'master') return 'Server + Hosted (all features)';
   return m;
+}
+
+/**
+ * City input with a polished autocomplete dropdown over a curated list of
+ * Indian cities. Filters by prefix-first then substring, highlights the
+ * matched portion, and supports full keyboard navigation. The user can
+ * still type any free-text city — we never block their typing, suggestions
+ * are only an aid.
+ */
+function CityInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+
+  const q = value.trim().toLowerCase();
+
+  const matches = useMemo(() => {
+    if (!q) return [];
+    const starts: string[] = [];
+    const contains: string[] = [];
+    for (const c of INDIAN_CITIES) {
+      const lc = c.toLowerCase();
+      if (lc === q) continue;
+      if (lc.startsWith(q)) starts.push(c);
+      else if (lc.includes(q)) contains.push(c);
+      if (starts.length >= 8) break;
+    }
+    return [...starts, ...contains].slice(0, 8);
+  }, [q]);
+
+  const showList = open && matches.length > 0;
+
+  // Close the dropdown when the user clicks anywhere outside the wrapper.
+  useEffect(() => {
+    function onDocPointer(e: MouseEvent | TouchEvent) {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setActive(-1);
+      }
+    }
+    document.addEventListener('mousedown', onDocPointer);
+    document.addEventListener('touchstart', onDocPointer, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', onDocPointer);
+      document.removeEventListener('touchstart', onDocPointer);
+    };
+  }, []);
+
+  // Keep the active item in view as the user arrows through the list.
+  useEffect(() => {
+    if (active < 0 || !listRef.current) return;
+    const node = listRef.current.querySelector<HTMLLIElement>(`li[data-idx="${active}"]`);
+    if (node) node.scrollIntoView({ block: 'nearest' });
+  }, [active]);
+
+  const select = (city: string) => {
+    onChange(city);
+    setOpen(false);
+    setActive(-1);
+    // Move focus back to the input so the user can keep tabbing through the form.
+    inputRef.current?.focus();
+  };
+
+  const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      if (!showList && matches.length) { setOpen(true); setActive(0); e.preventDefault(); return; }
+      if (showList) { setActive((a) => Math.min(matches.length - 1, a + 1)); e.preventDefault(); }
+    } else if (e.key === 'ArrowUp') {
+      if (showList) { setActive((a) => Math.max(0, a - 1)); e.preventDefault(); }
+    } else if (e.key === 'Enter') {
+      if (showList && active >= 0 && active < matches.length) {
+        e.preventDefault();
+        select(matches[active]);
+      }
+    } else if (e.key === 'Escape') {
+      if (open) { setOpen(false); setActive(-1); e.stopPropagation(); }
+    } else if (e.key === 'Tab') {
+      setOpen(false); setActive(-1);
+    }
+  };
+
+  // Highlights the matched substring inside a suggestion label.
+  const renderMatch = (c: string) => {
+    if (!q) return c;
+    const lc = c.toLowerCase();
+    const i = lc.indexOf(q);
+    if (i < 0) return c;
+    return (
+      <>
+        {c.slice(0, i)}
+        <mark className="gw-city-mark">{c.slice(i, i + q.length)}</mark>
+        {c.slice(i + q.length)}
+      </>
+    );
+  };
+
+  return (
+    <div className={`gw-city-wrap${showList ? ' open' : ''}`} ref={wrapRef}>
+      <div className="gw-city-field">
+        <span className="gw-city-icon" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z" />
+            <circle cx="12" cy="9.5" r="2.5" />
+          </svg>
+        </span>
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={(e) => { onChange(e.target.value); setOpen(true); setActive(-1); }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={onKey}
+          placeholder="Start typing your city"
+          maxLength={120}
+          autoComplete="address-level2"
+          spellCheck={false}
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={showList}
+          aria-controls="gw-city-listbox"
+          aria-activedescendant={showList && active >= 0 ? `gw-city-opt-${active}` : undefined}
+          required
+        />
+      </div>
+      {showList && (
+        <ul
+          id="gw-city-listbox"
+          className="gw-city-list"
+          ref={listRef}
+          role="listbox"
+        >
+          {matches.map((c, i) => (
+            <li
+              key={c}
+              id={`gw-city-opt-${i}`}
+              data-idx={i}
+              role="option"
+              aria-selected={i === active}
+              className={`gw-city-opt${i === active ? ' on' : ''}`}
+              onMouseDown={(e) => { e.preventDefault(); select(c); }}
+              onMouseEnter={() => setActive(i)}
+            >
+              <svg className="gw-city-opt-pin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 21s7-6.2 7-11.5A7 7 0 005 9.5C5 14.8 12 21 12 21z" />
+                <circle cx="12" cy="9.5" r="2.5" />
+              </svg>
+              <span className="gw-city-opt-name">{renderMatch(c)}</span>
+              <span className="gw-city-opt-tag">India</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 export function CheckoutSteps({ current }: { current: 1 | 2 }) {
