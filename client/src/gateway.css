@@ -2854,13 +2854,14 @@ code {
 .gw-sheet {
   width: 100%; max-width: 520px;
   max-height: calc(100vh - 32px);
-  overflow-y: auto;
+  max-height: calc(100dvh - 32px);
   background: var(--gw-surface);
   border: 1px solid var(--gw-border);
   border-radius: 18px;
   box-shadow: 0 28px 70px rgba(2,6,23,0.32);
-  padding: 18px 22px 22px;
-  display: flex; flex-direction: column; gap: 14px;
+  padding: 14px 22px 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
   animation: gwSheetIn .2s ease-out;
 }
 :root[data-theme="dark"] .gw-sheet {
@@ -2871,15 +2872,39 @@ code {
   to   { opacity: 1; transform: translateY(0); }
 }
 .gw-sheet-handle {
+  flex: 0 0 auto;
   width: 44px; height: 4px; border-radius: 999px;
   background: var(--gw-border-strong);
-  margin: 0 auto 4px; opacity: 0.7;
+  margin: 0 auto 8px; opacity: 0.7;
 }
 .gw-sheet-h {
+  flex: 0 0 auto;
   display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--gw-border);
 }
 .gw-sheet-h h3 { margin: 0 0 2px; font-size: 17px; color: var(--gw-text); }
 .gw-sheet-h p { margin: 0; font-size: 12.5px; }
+
+.gw-sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 14px 0;
+  scrollbar-gutter: stable;
+}
+
+.gw-sheet-foot {
+  flex: 0 0 auto;
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 12px 0 16px;
+  border-top: 1px solid var(--gw-border);
+  background: var(--gw-surface);
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+}
 
 @media (max-width: 540px) {
   .gw-modal-overlay { align-items: flex-end; padding: 0; }
@@ -2887,7 +2912,10 @@ code {
     max-width: 100%;
     border-radius: 18px 18px 0 0;
     max-height: 92vh;
+    max-height: 92dvh;
+    padding: 10px 16px 0;
   }
+  .gw-sheet-body { padding: 12px 0; }
 }
 
 /* Confirmation step blocks */

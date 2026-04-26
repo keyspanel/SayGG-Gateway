@@ -272,6 +272,30 @@ interface FormState {
 
 function CheckoutSheet({ plan, fee, initialProfile, defaultEmail, onClose, onConfirmed }: SheetProps) {
   const [step, setStep] = useState<'form' | 'confirm'>('form');
+
+  // Lock background scroll while the sheet is open (prevents the page behind from
+  // scrolling on mobile when the user drags inside the sheet).
+  useEffect(() => {
+    const { body, documentElement } = document;
+    const prevBody = body.style.overflow;
+    const prevHtml = documentElement.style.overflow;
+    body.style.overflow = 'hidden';
+    documentElement.style.overflow = 'hidden';
+    return () => {
+      body.style.overflow = prevBody;
+      documentElement.style.overflow = prevHtml;
+    };
+  }, []);
+
+  // Close on Escape for accessibility.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const [form, setForm] = useState<FormState>({
     email: initialProfile?.email || defaultEmail || '',
     phone: initialProfile?.phone || '',
@@ -327,9 +351,11 @@ function CheckoutSheet({ plan, fee, initialProfile, defaultEmail, onClose, onCon
     }
   };
 
+  const formId = 'gw-checkout-form';
+
   return (
     <div className="gw-modal-overlay" onClick={() => !saving && onClose()}>
-      <div className="gw-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-labelledby="cs-h">
+      <div className="gw-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="cs-h">
         <div className="gw-sheet-handle" aria-hidden="true" />
         <div className="gw-sheet-h">
           <div>
@@ -343,117 +369,124 @@ function CheckoutSheet({ plan, fee, initialProfile, defaultEmail, onClose, onCon
           <button className="gw-btn-ghost xs" onClick={onClose} aria-label="Close" disabled={saving}>✕</button>
         </div>
 
-        {err && <div className="gw-alert error"><span>{err}</span></div>}
+        <div className="gw-sheet-body">
+          {err && <div className="gw-alert error"><span>{err}</span></div>}
 
-        {step === 'form' ? (
-          <form className="gw-billing-form" onSubmit={goToConfirm} noValidate>
-            <label className={errField === 'email' ? 'err' : ''}>
-              <span>Gmail / Email *</span>
-              <input
-                type="email"
-                value={form.email}
-                onChange={(e) => set('email', e.target.value)}
-                placeholder="you@gmail.com"
-                maxLength={255}
-                autoFocus
-                required
-              />
-            </label>
-            <label className={errField === 'phone' ? 'err' : ''}>
-              <span>Mobile number *</span>
-              <input
-                value={form.phone}
-                onChange={(e) => set('phone', e.target.value)}
-                placeholder="+91 98xxxxxxxx"
-                maxLength={40}
-                inputMode="tel"
-                required
-              />
-            </label>
-            <label className={errField === 'full_name' ? 'err' : ''}>
-              <span>Name *</span>
-              <input
-                value={form.full_name}
-                onChange={(e) => set('full_name', e.target.value)}
-                placeholder="Your name"
-                maxLength={120}
-                required
-              />
-            </label>
-            <label>
-              <span>Country</span>
-              <input value="India" disabled readOnly />
-            </label>
-            <div className="gw-form-row">
-              <label className={errField === 'city' ? 'err' : ''}>
-                <span>City *</span>
-                <input value={form.city} onChange={(e) => set('city', e.target.value)} maxLength={120} required />
-              </label>
-              <label className={errField === 'postal_code' ? 'err' : ''}>
-                <span>Postal / ZIP *</span>
+          {step === 'form' ? (
+            <form id={formId} className="gw-billing-form" onSubmit={goToConfirm} noValidate>
+              <label className={errField === 'email' ? 'err' : ''}>
+                <span>Gmail / Email *</span>
                 <input
-                  value={form.postal_code}
-                  onChange={(e) => set('postal_code', e.target.value)}
-                  placeholder="6-digit PIN"
-                  maxLength={6}
-                  inputMode="numeric"
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => set('email', e.target.value)}
+                  placeholder="you@gmail.com"
+                  maxLength={255}
+                  autoFocus
                   required
                 />
               </label>
-            </div>
-            <div className="gw-modal-actions">
-              <button type="button" className="gw-btn-ghost" onClick={onClose}>Cancel</button>
-              <button type="submit" className="gw-btn-primary">Continue</button>
-            </div>
-          </form>
-        ) : (
-          <div className="gw-confirm">
-            <div className="gw-confirm-block">
-              <div className="gw-confirm-block-h">Billing to</div>
-              <div className="gw-confirm-rows">
-                <div><span>Name</span><b>{form.full_name}</b></div>
-                <div><span>Email</span><b>{form.email}</b></div>
-                <div><span>Mobile</span><b>{form.phone}</b></div>
-                <div><span>Country</span><b>India</b></div>
-                <div><span>City</span><b>{form.city}</b></div>
-                <div><span>Postal / ZIP</span><b>{form.postal_code}</b></div>
+              <label className={errField === 'phone' ? 'err' : ''}>
+                <span>Mobile number *</span>
+                <input
+                  value={form.phone}
+                  onChange={(e) => set('phone', e.target.value)}
+                  placeholder="+91 98xxxxxxxx"
+                  maxLength={40}
+                  inputMode="tel"
+                  required
+                />
+              </label>
+              <label className={errField === 'full_name' ? 'err' : ''}>
+                <span>Name *</span>
+                <input
+                  value={form.full_name}
+                  onChange={(e) => set('full_name', e.target.value)}
+                  placeholder="Your name"
+                  maxLength={120}
+                  required
+                />
+              </label>
+              <label>
+                <span>Country</span>
+                <input value="India" disabled readOnly />
+              </label>
+              <div className="gw-form-row">
+                <label className={errField === 'city' ? 'err' : ''}>
+                  <span>City *</span>
+                  <input value={form.city} onChange={(e) => set('city', e.target.value)} maxLength={120} required />
+                </label>
+                <label className={errField === 'postal_code' ? 'err' : ''}>
+                  <span>Postal / ZIP *</span>
+                  <input
+                    value={form.postal_code}
+                    onChange={(e) => set('postal_code', e.target.value)}
+                    placeholder="6-digit PIN"
+                    maxLength={6}
+                    inputMode="numeric"
+                    required
+                  />
+                </label>
               </div>
-              <button type="button" className="gw-btn-ghost xs gw-confirm-edit" onClick={() => setStep('form')} disabled={saving}>
-                Edit details
-              </button>
-            </div>
-
-            <div className="gw-confirm-block">
-              <div className="gw-confirm-block-h">Selected plan</div>
-              <div className="gw-confirm-plan">
-                <div>
-                  <b>{plan.name}</b>
-                  <div className="gw-muted" style={{ fontSize: 12 }}>{labelMethod(plan.method_access)} · {plan.duration_days >= 200 ? '1 year' : `${plan.duration_days} days`}</div>
+            </form>
+          ) : (
+            <div className="gw-confirm">
+              <div className="gw-confirm-block">
+                <div className="gw-confirm-block-h">Billing to</div>
+                <div className="gw-confirm-rows">
+                  <div><span>Name</span><b>{form.full_name}</b></div>
+                  <div><span>Email</span><b>{form.email}</b></div>
+                  <div><span>Mobile</span><b>{form.phone}</b></div>
+                  <div><span>Country</span><b>India</b></div>
+                  <div><span>City</span><b>{form.city}</b></div>
+                  <div><span>Postal / ZIP</span><b>{form.postal_code}</b></div>
                 </div>
-                <div className="gw-confirm-amt">₹{planPrice.toFixed(2)}</div>
+                <button type="button" className="gw-btn-ghost xs gw-confirm-edit" onClick={() => setStep('form')} disabled={saving}>
+                  Edit details
+                </button>
+              </div>
+
+              <div className="gw-confirm-block">
+                <div className="gw-confirm-block-h">Selected plan</div>
+                <div className="gw-confirm-plan">
+                  <div>
+                    <b>{plan.name}</b>
+                    <div className="gw-muted" style={{ fontSize: 12 }}>{labelMethod(plan.method_access)} · {plan.duration_days >= 200 ? '1 year' : `${plan.duration_days} days`}</div>
+                  </div>
+                  <div className="gw-confirm-amt">₹{planPrice.toFixed(2)}</div>
+                </div>
+              </div>
+
+              <div className="gw-confirm-block totals">
+                <div className="gw-confirm-line">
+                  <span>Plan</span><span>₹{planPrice.toFixed(2)}</span>
+                </div>
+                <div className="gw-confirm-line">
+                  <span>Fee</span><span>{fee > 0 ? `₹${fee.toFixed(2)}` : '₹0.00'}</span>
+                </div>
+                <div className="gw-confirm-line total">
+                  <span>Total payable</span><span>₹{total.toFixed(2)}</span>
+                </div>
               </div>
             </div>
+          )}
+        </div>
 
-            <div className="gw-confirm-block totals">
-              <div className="gw-confirm-line">
-                <span>Plan</span><span>₹{planPrice.toFixed(2)}</span>
-              </div>
-              <div className="gw-confirm-line">
-                <span>Fee</span><span>{fee > 0 ? `₹${fee.toFixed(2)}` : '₹0.00'}</span>
-              </div>
-              <div className="gw-confirm-line total">
-                <span>Total payable</span><span>₹{total.toFixed(2)}</span>
-              </div>
-            </div>
-
-            <div className="gw-modal-actions">
+        <div className="gw-sheet-foot">
+          {step === 'form' ? (
+            <>
+              <button type="button" className="gw-btn-ghost" onClick={onClose}>Cancel</button>
+              <button type="submit" form={formId} className="gw-btn-primary">Continue</button>
+            </>
+          ) : (
+            <>
               <button type="button" className="gw-btn-ghost" onClick={() => setStep('form')} disabled={saving}>Back</button>
               <button type="button" className="gw-btn-primary" onClick={confirm} disabled={saving}>
                 {saving ? 'Starting…' : `Confirm & pay ₹${total.toFixed(2)}`}
               </button>
-            </div>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
