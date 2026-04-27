@@ -1,0 +1,5 @@
+config.ini
+*.pyc
+__pycache__/
+*.log
+state/

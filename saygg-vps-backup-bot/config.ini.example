@@ -1,0 +1,63 @@
+; ─────────────────────────────────────────────────────────────────────
+;  SayGG VPS Backup Bot — config
+;  After editing, restart with:  sudo systemctl restart saygg-vps-bot
+; ─────────────────────────────────────────────────────────────────────
+
+[telegram]
+; Token from @BotFather (e.g. 7821234567:AAH...)
+bot_token = REPLACE_WITH_BOT_TOKEN
+; Comma-separated numeric chat IDs allowed to use the bot.
+; Get yours from @userinfobot. The first ID receives scheduled backups.
+owner_chat_ids = REPLACE_WITH_YOUR_CHAT_ID
+
+[backup]
+; Where archives are temporarily built before upload. Cleaned automatically.
+tmp_dir = /tmp/saygg-vps-bot
+; Telegram bots cap uploads at 50 MB. We split anything bigger.
+max_part_bytes = 47185920
+; Files/dirs excluded from the project tarballs.
+exclude_patterns = node_modules,.git,client/dist,*.log,__pycache__,.cache,dist,venv,.venv,build
+
+[schedule]
+; Comma-separated 24-hour HH:MM times for automatic backups (empty = off).
+; Example for two backups a day:  times = 03:00,15:00
+times = 03:00
+; full | db | files
+mode = full
+
+; ───────────── Projects (one section per project) ─────────────
+;   - label    : human name shown in Telegram
+;   - path     : absolute path to the project folder on the VPS
+;   - pm2_name : PM2 process name (only used in /status output)
+
+[project:gateway]
+label = SayGG Gateway
+path = /var/www/SayGG-Gateway
+pm2_name = saygg-gateway
+
+[project:app]
+label = SayGG App
+path = /var/www/sayggg-app
+pm2_name = sayggg-app
+
+[project:bot]
+label = SayGG Bot
+path = /var/www/sayggg-bot
+pm2_name = sayggg-bot
+
+; ───────────── Databases (one section per database) ─────────────
+;   - label : human name shown in Telegram
+;   - url   : full Postgres connection string used by pg_dump
+;             postgres://USER:PASSWORD@HOST:PORT/DBNAME
+
+[database:gateway_db]
+label = Gateway DB
+url = postgres://gateway_user:REPLACE_PASSWORD@127.0.0.1:5432/gateway_db
+
+[database:saygg_bot]
+label = SayGG Bot DB
+url = postgres://botuser:REPLACE_PASSWORD@127.0.0.1:5432/SayGGBOT
+
+[database:saygg_keys]
+label = SayGG Keys DB
+url = postgres://botuser:REPLACE_PASSWORD@127.0.0.1:5432/saygggkeys

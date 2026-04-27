@@ -18,10 +18,19 @@ Standalone Payment Gateway website with an Express API, React/Vite frontend, and
 - `scripts/backup-db.sh` — `pg_dump | gzip` of the gateway DB, rotates daily/weekly archives under `/var/backups/saygg-gateway/`.
 - `scripts/setup-backups.sh` — installs the cron entry that runs the backup nightly at 02:30.
 - `scripts/change-subdomain.sh` — interactive helper that rewrites the Nginx vhost, validates DNS, and (re)issues the Let's Encrypt cert. Cloudflare proxy must be in DNS-only mode while certbot runs.
-- `scripts/telegram-bot/` — owner-only Telegram backup bot.
+- `scripts/telegram-bot/` — gateway-only Telegram backup bot (single-project).
   - `bot.py` — long-polling listener (stdlib only). Commands: `/backup`, `/db`, `/files`, `/status`, `/whoami`, `/help`. Authorises against `OWNER_CHAT_IDS`.
   - `send-backup.sh` — builds `pg_dump | gzip` + `tar.gz` of `PROJECT_DIR` (excludes `node_modules`, `client/dist`, `.git`, logs), splits files >45 MB into Telegram-friendly parts, and ships them to the chat.
   - `install-bot.sh` — installs deps, writes `/etc/saygg-bot.env` (chmod 600), creates the `saygg-bot` systemd unit, and registers the nightly 03:00 cron job.
+
+## Standalone VPS Backup Bot
+- `saygg-vps-backup-bot/` — completely separate, multi-project Telegram bot. **Not** wired into the gateway. Copy this folder to the VPS to install.
+  - `bot.py` — long-polling listener with inline-keyboard menu, scheduler thread, multi-owner auth, history file, and a global lock that serialises backups so they never collide.
+  - `backup.py` — `pg_dump | gzip` for each `[database:*]` section and `tar.gz` for each `[project:*]` section. Auto-splits any artifact >45 MB into Telegram-sized parts.
+  - `telegram_api.py` — stdlib JSON wrapper for Telegram methods; `sendDocument` shells out to `curl` for reliable large multipart uploads.
+  - `config.ini` — single source of truth for token, owner chat IDs, schedule, projects (label/path/pm2_name) and databases (label/url). Lives at `/etc/saygg-vps-bot/config.ini` with chmod 600.
+  - `install.sh` / `uninstall.sh` — installs to `/opt/saygg-vps-bot`, registers `saygg-vps-bot.service` (systemd, `Restart=always`), state in `/var/lib/saygg-vps-bot`, log file `/var/log/saygg-vps-bot.log`.
+  - Telegram commands: `/menu`, `/backup`, `/databases`, `/files`, `/project <key>`, `/db <key>`, `/status`, `/disk`, `/last`, `/whoami`, `/help`. Inline buttons cover the same actions plus per-project / per-database submenus.
 
 ## Current UI/API Notes
 - Gateway UI is scoped under `client/src/*` and `client/src/gateway.css` with a mobile-first payment-console design.
