@@ -37,7 +37,7 @@ function getInitialTheme(): Theme {
     const t = localStorage.getItem('gw_theme');
     if (t === 'dark' || t === 'light') return t;
   } catch {}
-  return 'light';
+  return 'dark';
 }
 
 function useTheme(): [Theme, () => void] {

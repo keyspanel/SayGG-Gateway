@@ -14,15 +14,15 @@ const SUB_NAV: { to: string; label: string; end?: boolean }[] = [
 
 export default function OwnerPanel() {
   return (
-    <div className="gw-page">
-      <div className="gw-page-h">
+    <div className="gw-page gw-owner">
+      <div className="gw-page-h gw-owner-h">
         <div>
           <h2>Owner Panel</h2>
           <p>Plans, users, subscriptions and platform settings.</p>
         </div>
         <span className="gw-badge ok">Owner</span>
       </div>
-      <div className="gw-tabs" role="tablist">
+      <div className="gw-tabs gw-owner-tabs" role="tablist">
         {SUB_NAV.map((n) => (
           <NavLink
             key={n.to} to={n.to} end={n.end}
@@ -32,7 +32,9 @@ export default function OwnerPanel() {
           </NavLink>
         ))}
       </div>
-      <Outlet />
+      <div className="gw-owner-body">
+        <Outlet />
+      </div>
     </div>
   );
 }
