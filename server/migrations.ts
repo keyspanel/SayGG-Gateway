@@ -396,32 +396,35 @@ function parseList(env: string | undefined): string[] {
   return env.split(/[,\s;]+/).map((s) => s.trim()).filter(Boolean);
 }
 
-// Built-in owner account that ships with the project. The password is set
-// only on first creation — if the owner later changes it from the Account
-// tab in the Owner Panel, restarts of the server will NOT overwrite it.
-// Editing this constant won't reset an existing owner's credentials either.
-const DEFAULT_OWNER = {
-  username: 'SayGG',
-  email: 'saygg@local',
-  password: 'Sk.kiru@96',
-};
-
+// Owner account is seeded ONLY when SEED_OWNER_USERNAME, SEED_OWNER_EMAIL,
+// and SEED_OWNER_PASSWORD are all provided in the environment. This keeps
+// credentials out of source control. Existing owner passwords are never
+// overwritten — the seed only inserts if the username doesn't exist yet.
 async function ensureDefaultOwner(): Promise<void> {
+  const username = (process.env.SEED_OWNER_USERNAME || '').trim();
+  const email = (process.env.SEED_OWNER_EMAIL || '').trim();
+  const password = process.env.SEED_OWNER_PASSWORD || '';
+
+  if (!username || !email || !password) {
+    // No seed configured — skip silently. Owners can be created via
+    // /gateway/register and then promoted via OWNER_EMAILS / OWNER_USERNAMES.
+    return;
+  }
+
   try {
     const bcrypt = await import('bcryptjs');
-    const hash = await bcrypt.default.hash(DEFAULT_OWNER.password, 10);
-    // INSERT ... ON CONFLICT DO UPDATE only bumps role/updated_at — never
-    // the password — so any in-app credential change is preserved across
-    // restarts.
+    const hash = await bcrypt.default.hash(password, 10);
+    // INSERT only — never overwrites an existing user's password. If the
+    // username already exists we just make sure it has the owner role.
     await pool.query(
       `INSERT INTO gw_users (username, email, password_hash, role, is_active)
          VALUES ($1, $2, $3, 'owner', TRUE)
        ON CONFLICT (username) DO UPDATE
          SET role='owner', updated_at=NOW()`,
-      [DEFAULT_OWNER.username, DEFAULT_OWNER.email, hash],
+      [username, email, hash],
     );
   } catch (e) {
-    console.error('[gateway] failed to ensure default owner:', (e as Error).message);
+    console.error('[gateway] failed to ensure seeded owner:', (e as Error).message);
   }
 }
 
