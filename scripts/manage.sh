@@ -206,6 +206,23 @@ subdomain() {
   bash "$PROJECT_DIR/scripts/change-subdomain.sh"
 }
 
+bot_install() {
+  bash "$PROJECT_DIR/scripts/telegram-bot/install-bot.sh"
+}
+
+bot_status() {
+  systemctl status saygg-bot --no-pager || warn "saygg-bot service not installed yet"
+}
+
+bot_logs() {
+  journalctl -u saygg-bot -n 60 -f
+}
+
+bot_send() {
+  local mode="${1:-full}"
+  bash "$PROJECT_DIR/scripts/telegram-bot/send-backup.sh" "$mode"
+}
+
 menu() {
   while true; do
     echo
@@ -218,6 +235,10 @@ menu() {
     echo "  6) Clean reinstall + rebuild"
     echo "  7) Run backup now"
     echo "  8) Change subdomain"
+    echo "  9) Install / reinstall Telegram bot"
+    echo " 10) Telegram bot status"
+    echo " 11) Telegram bot logs"
+    echo " 12) Send full backup to Telegram now"
     echo "  q) Quit"
     read -r -p "Choose: " opt
     case "$opt" in
@@ -229,6 +250,10 @@ menu() {
       6) clean_restart ;;
       7) backup_now ;;
       8) subdomain ;;
+      9) bot_install ;;
+      10) bot_status ;;
+      11) bot_logs ;;
+      12) bot_send full ;;
       q|Q) exit 0 ;;
       *) warn "Unknown option" ;;
     esac
@@ -245,6 +270,10 @@ case "${1:-menu}" in
   backup)         backup_now ;;
   restore)        shift; restore "${1:-}" ;;
   subdomain)      subdomain ;;
+  bot-install)    bot_install ;;
+  bot-status)     bot_status ;;
+  bot-logs)       bot_logs ;;
+  bot-send)       shift; bot_send "${1:-full}" ;;
   menu|"")        menu ;;
   *)              err "Unknown command: $1"; exit 1 ;;
 esac

@@ -14,10 +14,14 @@ Standalone Payment Gateway website with an Express API, React/Vite frontend, and
 - `JWT_SECRET` is required in production; development preview uses a temporary fallback when it is not set.
 
 ## VPS Operations
-- `scripts/manage.sh` — single entry point on the VPS. Run with no args for an interactive menu, or pass a command (`deploy`, `restart`, `status`, `logs`, `doctor`, `clean-restart`, `backup`, `restore <file>`, `subdomain`).
+- `scripts/manage.sh` — single entry point on the VPS. Run with no args for an interactive menu, or pass a command (`deploy`, `restart`, `status`, `logs`, `doctor`, `clean-restart`, `backup`, `restore <file>`, `subdomain`, `bot-install`, `bot-status`, `bot-logs`, `bot-send [full|db|files]`).
 - `scripts/backup-db.sh` — `pg_dump | gzip` of the gateway DB, rotates daily/weekly archives under `/var/backups/saygg-gateway/`.
 - `scripts/setup-backups.sh` — installs the cron entry that runs the backup nightly at 02:30.
 - `scripts/change-subdomain.sh` — interactive helper that rewrites the Nginx vhost, validates DNS, and (re)issues the Let's Encrypt cert. Cloudflare proxy must be in DNS-only mode while certbot runs.
+- `scripts/telegram-bot/` — owner-only Telegram backup bot.
+  - `bot.py` — long-polling listener (stdlib only). Commands: `/backup`, `/db`, `/files`, `/status`, `/whoami`, `/help`. Authorises against `OWNER_CHAT_IDS`.
+  - `send-backup.sh` — builds `pg_dump | gzip` + `tar.gz` of `PROJECT_DIR` (excludes `node_modules`, `client/dist`, `.git`, logs), splits files >45 MB into Telegram-friendly parts, and ships them to the chat.
+  - `install-bot.sh` — installs deps, writes `/etc/saygg-bot.env` (chmod 600), creates the `saygg-bot` systemd unit, and registers the nightly 03:00 cron job.
 
 ## Current UI/API Notes
 - Gateway UI is scoped under `client/src/*` and `client/src/gateway.css` with a mobile-first payment-console design.
