@@ -1,6 +1,6 @@
-# Method 2 — Hosted Payment Page (QR Payment Link) — Real Manual Testing Guide
+# Hosted Payment Page (QR Payment Link) — Real Manual Testing Guide
 
-This guide walks you through testing **Method 2** end-to-end with **your own UPI credentials and a real payment**. Nothing in this flow is mocked — every request hits the live API and writes to your real database.
+This guide walks you through testing the **Hosted Payment Page** end-to-end with **your own UPI credentials and a real payment**. Nothing in this flow is mocked — every request hits the live API and writes to your real database.
 
 > Replace `<BASE>` with your live origin (e.g. `https://<your-replit-domain>` or `http://localhost:5000`).
 > The API base path is always `<BASE>/api/gateway`.
@@ -8,9 +8,9 @@ This guide walks you through testing **Method 2** end-to-end with **your own UPI
 
 ---
 
-## What Method 2 actually is
+## What the Hosted Payment Page actually is
 
-Method 2 = the same `POST /api/gateway/create-order` call you already use for Method 1, but you also use the new fields in the response:
+The Hosted Payment Page uses the same `POST /api/gateway/create-order` call you use for the Server-to-Server flow, but you also use the new fields in the response:
 
 | Field | What it is |
 |---|---|
@@ -53,7 +53,7 @@ Save → the page should show **Active**.
 
 ---
 
-## 2. Create a Method 2 order
+## 2. Create a Hosted Payment Page order
 
 ### 2.1 Easiest path — in-app **Test Console** (recommended)
 On `<BASE>/gateway/docs`, scroll to **Test Console** and:
@@ -83,7 +83,7 @@ curl -X POST '<BASE>/api/gateway/create-order' \
     "client_order_id": "TEST-M2-0001",
     "customer_reference": "self-test",
     "callback_url": "https://webhook.site/your-unique-url",
-    "note": "Method 2 manual test"
+    "note": "Hosted Payment Page manual test"
   }'
 ```
 
@@ -287,7 +287,7 @@ Also check `<BASE>/gateway` (Dashboard) — the totals (orders, paid, pending, r
 
 ## 7. End-to-end happy path checklist
 
-Use this exact sequence to validate a real Method 2 flow:
+Use this exact sequence to validate a real Hosted Payment Page flow:
 
 - [ ] Login to `<BASE>/gateway/login`
 - [ ] Save real UPI settings on `<BASE>/gateway/settings` (status = **Active**)

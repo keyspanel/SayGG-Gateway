@@ -630,7 +630,7 @@ function ServerTab({ baseUrl, token, canServer, ctaLabel, onGoToBilling }: {
     <MethodOverviewCard
       icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>}
       title="Server API"
-      methodLabel="Method 1"
+      methodLabel="Server-to-Server"
       description="Your backend creates orders, receives the UPI payload, shows QR or UPI links inside your own UI, and confirms payment status. The API token stays private on your server."
       features={[
         { title: 'Full UI control',     sub: 'Render QR / UPI links in your own checkout' },
@@ -717,7 +717,7 @@ function ServerTab({ baseUrl, token, canServer, ctaLabel, onGoToBilling }: {
       <LockedPreview
         locked={!canServer}
         reason="Server API locked"
-        subtitle="Activate the Server API or Master plan to unlock the Method 1 endpoints."
+        subtitle="Activate the Server API or Master plan to unlock the Server-to-Server endpoints."
         ctaLabel={ctaLabel}
         onCta={onGoToBilling}
       >
@@ -757,7 +757,7 @@ function HostedPageTab({ canHosted, ctaLabel, onGoToBilling }: {
     <MethodOverviewCard
       icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>}
       title="Hosted payment page"
-      methodLabel="Method 2"
+      methodLabel="Hosted Payment Page"
       description="Your backend creates the order and receives a payment_page_url. Send that URL to the customer — the hosted page handles QR display, UPI app links, status polling, and the final redirect."
       features={[
         { title: 'Drop-in checkout',  sub: 'Zero UI work — just send a URL' },
@@ -881,7 +881,7 @@ function HostedPageTab({ canHosted, ctaLabel, onGoToBilling }: {
       <LockedPreview
         locked={!canHosted}
         reason="Hosted Pay Page locked"
-        subtitle="Activate the Hosted Pay Page or Master plan to unlock the Method 2 endpoints."
+        subtitle="Activate the Hosted Pay Page or Master plan to unlock the Hosted Payment Page endpoints."
         ctaLabel={ctaLabel}
         onCta={onGoToBilling}
       >
@@ -905,7 +905,7 @@ function SetupTab({ baseUrl, canServer, canHosted, isMasterOrOwner, hasPlan, ser
       <div className="gw-card-h">
         <h3>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-          Method 1 — Server API setup
+          Server-to-Server API setup
         </h3>
         {canServer && <span className="gw-badge mute">Your plan</span>}
       </div>
@@ -929,7 +929,7 @@ function SetupTab({ baseUrl, canServer, canHosted, isMasterOrOwner, hasPlan, ser
       <div className="gw-card-h">
         <h3>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-          Method 2 — Hosted payment page setup
+          Hosted Payment Page setup
         </h3>
         {canHosted && !canServer && <span className="gw-badge mute">Your plan</span>}
       </div>
@@ -972,7 +972,7 @@ function SetupTab({ baseUrl, canServer, canHosted, isMasterOrOwner, hasPlan, ser
 
       <LockedPreview
         locked={!canServer}
-        reason={!hasPlan ? 'Method 1 setup locked' : 'Server API setup locked.'}
+        reason={!hasPlan ? 'Server-to-Server setup locked' : 'Server API setup locked.'}
         subtitle={!hasPlan ? 'Choose a plan to unlock the Server API guide.' : 'Upgrade to Master to unlock both methods.'}
         ctaLabel={serverCtaLabel}
         onCta={onGoToBilling}
@@ -982,7 +982,7 @@ function SetupTab({ baseUrl, canServer, canHosted, isMasterOrOwner, hasPlan, ser
 
       <LockedPreview
         locked={!canHosted}
-        reason={!hasPlan ? 'Method 2 setup locked' : 'Hosted Pay Page setup locked.'}
+        reason={!hasPlan ? 'Hosted Payment Page setup locked' : 'Hosted Pay Page setup locked.'}
         subtitle={!hasPlan ? 'Choose a plan to unlock the Hosted Page guide.' : 'Upgrade to Master to unlock both methods.'}
         ctaLabel={hostedCtaLabel}
         onCta={onGoToBilling}

@@ -96,7 +96,7 @@ ALTER TABLE gw_orders ADD COLUMN IF NOT EXISTS redirect_url TEXT;
 -- customer back to a retry / cart page on unsuccessful payments.
 ALTER TABLE gw_orders ADD COLUMN IF NOT EXISTS cancel_url TEXT;
 
--- Method 1 (server) vs Method 2 (hosted) split. Existing rows default to
+-- Server-to-Server vs Hosted Payment Page split. Existing rows default to
 -- 'hosted' so the legacy hosted pay page keeps working untouched.
 ALTER TABLE gw_orders ADD COLUMN IF NOT EXISTS order_mode VARCHAR(20) DEFAULT 'hosted' NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_gw_orders_user_mode ON gw_orders(user_id, order_mode);
@@ -249,7 +249,7 @@ const DEFAULT_PLANS: PlanSeed[] = [
     duration_days: 30,
     price: 999,
     discount_price: 799,
-    description: 'Method 1 — direct server-to-server API for backend integrations.',
+    description: 'Server-to-Server API for backend integrations.',
     features: [
       'Server-to-server API',
       'Raw UPI payload',
@@ -267,7 +267,7 @@ const DEFAULT_PLANS: PlanSeed[] = [
     duration_days: 30,
     price: 1499,
     discount_price: 1199,
-    description: 'Method 2 — branded hosted payment links with QR and redirects.',
+    description: 'Hosted Payment Page — branded payment links with QR and redirects.',
     features: [
       'Hosted payment page',
       'Payment links',
@@ -286,7 +286,7 @@ const DEFAULT_PLANS: PlanSeed[] = [
     duration_days: 30,
     price: 2499,
     discount_price: 1999,
-    description: 'All access — both Method 1 and Method 2 unlocked together.',
+    description: 'All access — both Server-to-Server and Hosted Payment Page unlocked together.',
     features: [
       'Server API',
       'Hosted Pay Page',
@@ -307,7 +307,7 @@ const DEFAULT_PLANS: PlanSeed[] = [
     duration_days: 365,
     price: 11988,        // 999 × 12
     discount_price: 7990, // 799 × 10  → 2 months free
-    description: 'Method 1 — direct server-to-server API. Pay yearly and save ~17%.',
+    description: 'Server-to-Server API. Pay yearly and save ~17%.',
     features: [
       'Server-to-server API',
       'Raw UPI payload',
@@ -326,7 +326,7 @@ const DEFAULT_PLANS: PlanSeed[] = [
     duration_days: 365,
     price: 17988,         // 1499 × 12
     discount_price: 11990, // 1199 × 10
-    description: 'Method 2 — branded hosted links with QR and redirects. Pay yearly and save ~17%.',
+    description: 'Hosted Payment Page — branded links with QR and redirects. Pay yearly and save ~17%.',
     features: [
       'Hosted payment page',
       'Payment links',

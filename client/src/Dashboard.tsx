@@ -471,5 +471,5 @@ export function StatusBadge({ status }: { status: string }) {
 
 export function ModeBadge({ mode }: { mode: string }) {
   const cls = mode === 'server' ? 'mode-server' : 'mode-hosted';
-  return <span className={`gw-badge ${cls}`} title={mode === 'server' ? 'Method 1 — JSON only' : 'Method 2 — hosted page'}>{mode}</span>;
+  return <span className={`gw-badge ${cls}`} title={mode === 'server' ? 'Server-to-Server — JSON only' : 'Hosted Payment Page'}>{mode}</span>;
 }
